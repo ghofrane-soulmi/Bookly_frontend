@@ -1,9 +1,14 @@
 export const routes = [
-  { path: '/', redirect: '/typography' },
+  { path: '/', redirect: '/dashboard' },
   {
     path: '/',
     component: () => import('@/layouts/default.vue'),
+    meta: { requiresAuth: true },
     children: [
+      {
+        path: 'dashboard',
+        component: () => import('@/pages/dashboard.vue'),
+      },
       {
         path: 'typography',
         component: () => import('@/pages/typography.vue'),
@@ -30,6 +35,14 @@ export const routes = [
     path: '/',
     component: () => import('@/layouts/blank.vue'),
     children: [
+      {
+        path: 'login',
+        component: () => import('@/pages/login.vue'),
+      },
+      {
+        path: 'register',
+        component: () => import('@/pages/register.vue'),
+      },
       {
         path: '/:pathMatch(.*)*',
         component: () => import('@/pages/[...error].vue'),

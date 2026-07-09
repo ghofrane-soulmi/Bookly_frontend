@@ -1,5 +1,14 @@
 <script setup lang="ts">
 import avatar1 from '@images/avatars/avatar-1.png'
+import { useAuthStore } from '@/stores/auth'
+
+const router = useRouter()
+const authStore = useAuthStore()
+
+const onLogout = async () => {
+  await authStore.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
@@ -48,10 +57,10 @@ import avatar1 from '@images/avatars/avatar-1.png'
             </template>
 
             <VListItemTitle class="font-weight-semibold">
-              John Doe
+              {{ authStore.user?.name }}
             </VListItemTitle>
-            <VListItemSubtitle>
-              Admin
+            <VListItemSubtitle class="text-capitalize">
+              {{ authStore.user?.role }}
             </VListItemSubtitle>
           </VListItem>
           <VDivider class="my-2" />
@@ -112,7 +121,7 @@ import avatar1 from '@images/avatars/avatar-1.png'
           <VDivider class="my-2" />
 
           <!-- 👉 Logout -->
-          <VListItem to="/login">
+          <VListItem @click="onLogout">
             <template #prepend>
               <VIcon
                 class="me-2"

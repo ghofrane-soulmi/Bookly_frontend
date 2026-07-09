@@ -16,6 +16,12 @@ import VerticalNavLink from '@layouts/components/VerticalNavLink.vue'
   >
     <VerticalNavLink
       :item="{
+        title: 'Analytics',
+        to: '/dashboard',
+      }"
+    />
+    <VerticalNavLink
+      :item="{
         title: 'CRM',
         href: 'https://demos.themeselection.com/sneat-vuetify-vuejs-admin-template/demo-1/dashboards/crm',
         target: '_blank',
