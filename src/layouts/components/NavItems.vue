@@ -58,6 +58,20 @@ import VerticalNavLink from '@layouts/components/VerticalNavLink.vue'
     />
   </VerticalNavGroup>
 
+  <!-- 👉 Business -->
+  <VerticalNavSectionTitle
+    :item="{
+      heading: 'Business',
+    }"
+  />
+  <VerticalNavLink
+    :item="{
+      title: 'Services',
+      icon: 'bx-spreadsheet',
+      to: '/services',
+    }"
+  />
+
   <!-- 👉 Front Pages -->
   <VerticalNavGroup
     :item="{
