@@ -71,6 +71,13 @@ import VerticalNavLink from '@layouts/components/VerticalNavLink.vue'
       to: '/services',
     }"
   />
+  <VerticalNavLink
+    :item="{
+      title: 'Clients',
+      icon: 'bx-group',
+      to: '/clients',
+    }"
+  />
 
   <!-- 👉 Front Pages -->
   <VerticalNavGroup
