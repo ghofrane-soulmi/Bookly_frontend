@@ -78,6 +78,13 @@ import VerticalNavLink from '@layouts/components/VerticalNavLink.vue'
       to: '/clients',
     }"
   />
+  <VerticalNavLink
+    :item="{
+      title: 'Appointments',
+      icon: 'bx-calendar-check',
+      to: '/appointments',
+    }"
+  />
 
   <!-- 👉 Front Pages -->
   <VerticalNavGroup

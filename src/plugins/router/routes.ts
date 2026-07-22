@@ -22,6 +22,10 @@ export const routes = [
         component: () => import('@/pages/client-detail.vue'),
       },
       {
+        path: 'appointments',
+        component: () => import('@/pages/appointments.vue'),
+      },
+      {
         path: 'typography',
         component: () => import('@/pages/typography.vue'),
       },
