@@ -30,6 +30,10 @@ export const routes = [
         component: () => import('@/pages/calendar.vue'),
       },
       {
+        path: 'staff',
+        component: () => import('@/pages/staff.vue'),
+      },
+      {
         path: 'typography',
         component: () => import('@/pages/typography.vue'),
       },

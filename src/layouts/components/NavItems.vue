@@ -92,6 +92,13 @@ import VerticalNavLink from '@layouts/components/VerticalNavLink.vue'
       to: '/calendar',
     }"
   />
+  <VerticalNavLink
+    :item="{
+      title: 'Staff',
+      icon: 'bx-id-card',
+      to: '/staff',
+    }"
+  />
 
   <!-- 👉 Front Pages -->
   <VerticalNavGroup
