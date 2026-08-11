@@ -34,6 +34,10 @@ export const routes = [
         component: () => import('@/pages/staff.vue'),
       },
       {
+        path: 'account-settings',
+        component: () => import('@/pages/account-settings.vue'),
+      },
+      {
         path: 'typography',
         component: () => import('@/pages/typography.vue'),
       },
