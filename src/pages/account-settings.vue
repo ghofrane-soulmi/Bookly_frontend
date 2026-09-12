@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import AccountSettingsAccount from '@/views/pages/account-settings/AccountSettingsAccount.vue'
 import AccountSettingsBusiness from '@/views/pages/account-settings/AccountSettingsBusiness.vue'
+import AccountSettingsNotifications from '@/views/pages/account-settings/AccountSettingsNotifications.vue'
 
 const route = useRoute()
 
@@ -10,6 +11,7 @@ const activeTab = ref(route.params.tab ?? 'account')
 const tabs = [
   { title: 'Account', icon: 'bx-user', tab: 'account' },
   { title: 'Business', icon: 'bx-store', tab: 'business' },
+  { title: 'Notifications', icon: 'bx-bell', tab: 'notifications' },
 ]
 </script>
 
@@ -46,6 +48,11 @@ const tabs = [
       <!-- Business -->
       <VWindowItem value="business">
         <AccountSettingsBusiness />
+      </VWindowItem>
+
+      <!-- Notifications -->
+      <VWindowItem value="notifications">
+        <AccountSettingsNotifications />
       </VWindowItem>
     </VWindow>
   </div>
