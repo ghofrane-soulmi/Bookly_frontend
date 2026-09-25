@@ -1,3 +1,4 @@
+import type { Money } from '@/utils/money'
 import type { ApiEnvelope } from './services.types'
 
 export interface Client {
@@ -12,14 +13,15 @@ export interface ClientAppointmentHistoryItem {
   id: number
   starts_at: string
   status: 'scheduled' | 'completed' | 'cancelled' | 'no_show'
-  service: { id: number, name: string, price: string }
+  price: Money
+  service: { id: number, name: string, price: Money }
   staff: { id: number, name: string }
 }
 
 export interface ClientStats {
   total_appointments: number
   completed_appointments: number
-  total_spent: number
+  total_spent: Money
 }
 
 export interface ClientDetail extends Client {

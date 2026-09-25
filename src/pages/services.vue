@@ -3,6 +3,10 @@ import { watchDebounced } from '@vueuse/core'
 import ListPaginationFooter from '@/components/ListPaginationFooter.vue'
 import { servicesApis } from '@/core/apis/services.apis'
 import type { Service } from '@/core/apis/types/services.types'
+import { useAuthStore } from '@/stores/auth'
+import { currencyDecimals, formatMoney, toMajorUnits } from '@/utils/money'
+
+const authStore = useAuthStore()
 
 // Patron Créer/Modifier : A. Modale intégrée à la liste (≤ 6 champs)
 
@@ -78,7 +82,7 @@ const exportCsv = () => {
     s.description ?? '',
     s.category ?? '',
     String(s.duration_minutes),
-    s.price,
+    formatMoney(s.price),
     s.is_active ? 'Active' : 'Inactive',
   ])
 
@@ -126,12 +130,14 @@ const openEditDialog = (service: Service) => {
     description: service.description ?? '',
     category: service.category ?? '',
     duration_minutes: service.duration_minutes,
-    price: Number(service.price),
+    price: toMajorUnits(service.price),
     color: service.color ?? '#7367F0',
   }
   formErrors.value = {}
   isDialogOpen.value = true
 }
+
+const priceStep = computed(() => 10 ** -currencyDecimals(authStore.business?.currency_code ?? 'USD'))
 
 const saveService = async () => {
   isSaving.value = true
@@ -271,7 +277,7 @@ const deleteService = async () => {
       </template>
 
       <template #item.price="{ item }">
-        ${{ Number(item.price).toFixed(2) }}
+        {{ formatMoney(item.price) }}
       </template>
 
       <template #item.is_active="{ item }">
@@ -358,8 +364,9 @@ const deleteService = async () => {
               <VTextField
                 v-model.number="form.price"
                 type="number"
+                :step="priceStep"
+                min="0"
                 label="Price"
-                prefix="$"
                 :error-messages="formErrors.price"
               />
             </VCol>

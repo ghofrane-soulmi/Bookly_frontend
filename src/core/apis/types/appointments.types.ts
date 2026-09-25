@@ -1,3 +1,4 @@
+import type { Money } from '@/utils/money'
 import type { ApiEnvelope } from './services.types'
 
 export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show'
@@ -8,8 +9,11 @@ export interface Appointment {
   ends_at: string
   status: AppointmentStatus
   notes: string | null
+  // The price actually charged at booking time — not the service's current
+  // price, which may have changed since. See Phase 0 Step 5.
+  price: Money
   client: { id: number, name: string }
-  service: { id: number, name: string, price: string }
+  service: { id: number, name: string, price: Money }
   staff: { id: number, name: string }
 }
 

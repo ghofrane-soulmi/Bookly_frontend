@@ -37,20 +37,20 @@ const onSubmit = async () => {
 </script>
 
 <template>
-  <div class="auth-wrapper d-flex align-center justify-center pa-4">
-    <div class="position-relative my-sm-16">
+  <div class="auth-wrapper d-flex align-center justify-center ">
+    <div class="position-relative ">
       <!-- 👉 Top shape -->
-      <VImg
-        :src="authV1TopShape"
-        class="text-primary auth-v1-top-shape d-none d-sm-block"
-      />
+
+<!--      <VImg-->
+<!--        :src="authV1TopShape"-->
+<!--        class="text-primary auth-v1-top-shape d-none d-sm-block"-->
+<!--      />-->
 
       <!-- 👉 Bottom shape -->
       <VImg
         :src="authV1BottomShape"
         class="text-primary auth-v1-bottom-shape d-none d-sm-block"
       />
-
       <!-- 👉 Auth Card -->
       <VCard
         class="auth-card"
@@ -68,14 +68,14 @@ const onSubmit = async () => {
               v-html="logo"
             />
             <h1 class="app-logo-title">
-              sneat
+              Bookly
             </h1>
           </RouterLink>
         </VCardItem>
 
         <VCardText>
           <h4 class="text-h4 mb-1">
-            Welcome to Sneat! 👋🏻
+            Welcome to Bookly!
           </h4>
           <p class="mb-0">
             Please sign-in to your account and start the adventure

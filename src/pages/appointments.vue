@@ -5,10 +5,7 @@ import { appointmentsApis } from '@/core/apis/appointments.apis'
 import type { Appointment, AppointmentStatus, AppointmentStatusCounts } from '@/core/apis/types/appointments.types'
 import { api } from '@/utils/api'
 import { formatDateTime } from '@/utils/datetime'
-import { useAuthStore } from '@/stores/auth'
-
-const authStore = useAuthStore()
-const formatCurrency = (value: number) => value.toLocaleString('en-US', { style: 'currency', currency: authStore.business?.currency ?? 'USD' })
+import { formatMoney } from '@/utils/money'
 
 // Patron Créer/Modifier : A. Modale intégrée à la liste (≤ 6 champs)
 
@@ -52,7 +49,7 @@ const headers = [
   { title: 'Client', key: 'client.name' },
   { title: 'Service', key: 'service.name' },
   { title: 'Staff', key: 'staff.name' },
-  { title: 'Amount', key: 'service.price' },
+  { title: 'Amount', key: 'price' },
   { title: 'Starts', key: 'starts_at' },
   { title: 'Status', key: 'status' },
   { title: 'Actions', key: 'actions', sortable: false, align: 'end' as const },
@@ -118,7 +115,7 @@ const exportCsv = () => {
     a.client.name,
     a.service.name,
     a.staff.name,
-    a.service.price,
+    formatMoney(a.price),
     formatDateTime(a.starts_at),
     a.status,
   ])
@@ -407,8 +404,8 @@ const deleteAppointment = async () => {
         </div>
       </template>
 
-      <template #item.service.price="{ item }">
-        {{ formatCurrency(Number(item.service.price)) }}
+      <template #item.price="{ item }">
+        {{ formatMoney(item.price) }}
       </template>
 
       <template #item.starts_at="{ item }">

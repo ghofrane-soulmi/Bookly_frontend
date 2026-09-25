@@ -1,16 +1,49 @@
 <script lang="ts" setup>
 import { businessApis } from '@/core/apis/business.apis'
+import type { OperatingHours } from '@/core/apis/types/business.types'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
+
+const days = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'tuesday', label: 'Tuesday' },
+  { key: 'wednesday', label: 'Wednesday' },
+  { key: 'thursday', label: 'Thursday' },
+  { key: 'friday', label: 'Friday' },
+  { key: 'saturday', label: 'Saturday' },
+  { key: 'sunday', label: 'Sunday' },
+] as const
+
+const defaultOperatingHours = (): OperatingHours => ({
+  monday: { open: '09:00', close: '18:00' },
+  tuesday: { open: '09:00', close: '18:00' },
+  wednesday: { open: '09:00', close: '18:00' },
+  thursday: { open: '09:00', close: '18:00' },
+  friday: { open: '09:00', close: '18:00' },
+  saturday: null,
+  sunday: null,
+})
 
 const form = ref({
   name: '',
   email: '',
   phone: '',
   timezone: 'UTC',
-  currency: 'USD',
+  currency_code: 'USD',
 })
+
+const restrictHours = ref(false)
+const operatingHours = ref<OperatingHours>(defaultOperatingHours())
+
+const toggleRestrictHours = (value: boolean | null) => {
+  if (value && Object.values(operatingHours.value).every(day => day === null))
+    operatingHours.value = defaultOperatingHours()
+}
+
+const toggleDayOpen = (dayKey: keyof OperatingHours, isOpen: boolean | null) => {
+  operatingHours.value[dayKey] = isOpen ? { open: '09:00', close: '18:00' } : null
+}
 
 const isLoading = ref(true)
 const isSaving = ref(false)
@@ -43,7 +76,9 @@ const timezones = [
   'Pacific/Auckland',
 ]
 
-const currencies = ['USD', 'EUR', 'GBP', 'AUD', 'CAD', 'CHF', 'CNY', 'INR', 'JPY', 'MAD', 'AED']
+// Mirrors the currencies seeded in the `currencies` table. Move this to a
+// GET /currencies lookup once that endpoint exists.
+const currencies = ['TND', 'EUR', 'USD', 'GBP', 'MAD', 'DZD', 'JPY']
 
 const fetchBusiness = async () => {
   isLoading.value = true
@@ -58,7 +93,16 @@ const fetchBusiness = async () => {
         email: res.data.email ?? '',
         phone: res.data.phone ?? '',
         timezone: res.data.timezone,
-        currency: res.data.currency,
+        currency_code: res.data.currency_code,
+      }
+
+      if (res.data.operating_hours) {
+        restrictHours.value = true
+        operatingHours.value = res.data.operating_hours
+      }
+      else {
+        restrictHours.value = false
+        operatingHours.value = defaultOperatingHours()
       }
     }
     else {
@@ -81,13 +125,16 @@ const saveBusiness = async () => {
   successMessage.value = ''
 
   try {
-    const res = await businessApis.handleUpdateBusiness(form.value)
+    const res = await businessApis.handleUpdateBusiness({
+      ...form.value,
+      operating_hours: restrictHours.value ? operatingHours.value : null,
+    })
 
     if (res.status.code === 200) {
       authStore.updateBusiness({
         name: form.value.name,
         timezone: form.value.timezone,
-        currency: form.value.currency,
+        currency_code: form.value.currency_code,
       })
       successMessage.value = 'Business updated successfully.'
     }
@@ -189,11 +236,71 @@ const saveBusiness = async () => {
                 md="6"
               >
                 <VSelect
-                  v-model="form.currency"
+                  v-model="form.currency_code"
                   label="Currency"
                   :items="currencies"
-                  :error-messages="formErrors.currency"
+                  :error-messages="formErrors.currency_code"
                 />
+              </VCol>
+
+              <VCol cols="12">
+                <VSwitch
+                  v-model="restrictHours"
+                  label="Only allow appointments within specific operating hours"
+                  @update:model-value="toggleRestrictHours"
+                />
+              </VCol>
+
+              <VCol
+                v-if="restrictHours"
+                cols="12"
+              >
+                <VTable density="comfortable">
+                  <thead>
+                    <tr>
+                      <th>Day</th>
+                      <th>Open</th>
+                      <th>Opens at</th>
+                      <th>Closes at</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="day in days"
+                      :key="day.key"
+                    >
+                      <td>{{ day.label }}</td>
+                      <td>
+                        <VSwitch
+                          :model-value="operatingHours[day.key] !== null"
+                          density="compact"
+                          hide-details
+                          @update:model-value="value => toggleDayOpen(day.key, value)"
+                        />
+                      </td>
+                      <td>
+                        <VTextField
+                          v-if="operatingHours[day.key]"
+                          v-model="operatingHours[day.key]!.open"
+                          type="time"
+                          density="compact"
+                          hide-details
+                          :error-messages="formErrors[`operating_hours.${day.key}.open`]"
+                        />
+                      </td>
+                      <td>
+                        <VTextField
+                          v-if="operatingHours[day.key]"
+                          v-model="operatingHours[day.key]!.close"
+                          type="time"
+                          density="compact"
+                          hide-details
+                          :error-messages="formErrors[`operating_hours.${day.key}.close`]"
+                        />
+                      </td>
+                    </tr>
+                  </tbody>
+                </VTable>
               </VCol>
 
               <VCol

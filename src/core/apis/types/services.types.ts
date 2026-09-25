@@ -1,10 +1,12 @@
+import type { Money } from '@/utils/money'
+
 export interface Service {
   id: number
   name: string
   description: string | null
   category: string | null
   duration_minutes: number
-  price: string
+  price: Money
   color: string | null
   is_active: boolean
 }

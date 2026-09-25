@@ -14,7 +14,7 @@ export interface AuthBusiness {
   name: string
   slug: string
   timezone: string
-  currency: string
+  currency_code: string
 }
 
 interface RegisterPayload {
@@ -104,6 +104,15 @@ export const useAuthStore = defineStore('auth', {
       finally {
         this.clearSession()
       }
+    },
+
+    async refresh() {
+      // Returns only a new token (no user/business), so the rest of the
+      // session is left as-is.
+      const { data } = await api.post('/auth/refresh')
+
+      this.token = data.token
+      localStorage.setItem('bookly_token', data.token)
     },
   },
 })

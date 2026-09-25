@@ -3,6 +3,8 @@ import { useTheme } from 'vuetify'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/utils/api'
 import { formatDateTime, formatMonthLabel, formatShortDate } from '@/utils/datetime'
+import type { Money } from '@/utils/money'
+import { formatMoney, toMajorUnits } from '@/utils/money'
 import { hexToRgb } from '@layouts/utils'
 
 interface RankedItem {
@@ -29,10 +31,10 @@ interface DashboardSummary {
   upcoming_appointments: number
   total_clients: number
   total_services: number
-  revenue_this_month: number
+  revenue_this_month: Money
   revenue_change_percent: number | null
   bookings_by_day: { date: string, count: number }[]
-  revenue_by_month: { month: string, revenue: number }[]
+  revenue_by_month: { month: string, revenue: Money }[]
   top_services: RankedItem[]
   busiest_staff: RankedItem[]
   recent_appointments: RecentAppointment[]
@@ -56,7 +58,17 @@ const fetchSummary = async () => {
 
 fetchSummary()
 
-const formatCurrency = (value: number) => value.toLocaleString('en-US', { style: 'currency', currency: authStore.business?.currency ?? 'USD' })
+/**
+ * Chart callbacks (yaxis/tooltip formatters) only receive a bare major-unit
+ * number, not the original Money object — so this formats using the
+ * dashboard's own currency (one business = one currency per response)
+ * rather than going through formatMoney, which expects minor units.
+ */
+const formatMajorAmount = (major: number) => new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: summary.value?.revenue_this_month.currency ?? 'USD',
+}).format(major)
+
 const timeAgo = (iso: string) => {
   const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
 
@@ -85,7 +97,7 @@ const miniStats = computed(() => [
 ])
 
 const statTiles = computed(() => [
-  { title: 'Revenue this month', value: formatCurrency(summary.value?.revenue_this_month ?? 0), icon: 'bx-dollar-circle' },
+  { title: 'Revenue this month', value: formatMoney(summary.value?.revenue_this_month), icon: 'bx-dollar-circle' },
   { title: 'Total Clients', value: String(summary.value?.total_clients ?? 0), icon: 'bx-group' },
   { title: 'Total Services', value: String(summary.value?.total_services ?? 0), icon: 'bx-spreadsheet' },
 ])
@@ -161,15 +173,15 @@ const revenueByMonthOptions = computed(() => {
     yaxis: {
       labels: {
         style: { colors: mutedColor },
-        formatter: (value: number) => formatCurrency(value),
+        formatter: (value: number) => formatMajorAmount(value),
       },
     },
-    tooltip: { y: { formatter: (value: number) => formatCurrency(value) } },
+    tooltip: { y: { formatter: (value: number) => formatMajorAmount(value) } },
   }
 })
 
 const revenueByMonthSeries = computed(() => [
-  { name: 'Revenue', data: summary.value?.revenue_by_month.map(m => m.revenue) ?? [] },
+  { name: 'Revenue', data: summary.value?.revenue_by_month.map(m => toMajorUnits(m.revenue)) ?? [] },
 ])
 
 const rankChartOptions = (items: RankedItem[]) => {

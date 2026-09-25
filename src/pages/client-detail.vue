@@ -2,11 +2,10 @@
 import { clientsApis } from '@/core/apis/clients.apis'
 import type { ClientDetail } from '@/core/apis/types/clients.types'
 import { formatDateTime } from '@/utils/datetime'
-import { useAuthStore } from '@/stores/auth'
+import { formatMoney } from '@/utils/money'
 
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
 
 const client = ref<ClientDetail | null>(null)
 const isLoading = ref(true)
@@ -22,12 +21,10 @@ const statusColors: Record<string, string> = {
 const headers = [
   { title: 'Service', key: 'service.name' },
   { title: 'Staff', key: 'staff.name' },
-  { title: 'Amount', key: 'service.price' },
+  { title: 'Amount', key: 'price' },
   { title: 'Date', key: 'starts_at' },
   { title: 'Status', key: 'status' },
 ]
-
-const formatCurrency = (value: number) => value.toLocaleString('en-US', { style: 'currency', currency: authStore.business?.currency ?? 'USD' })
 
 const fetchClient = async () => {
   isLoading.value = true
@@ -155,7 +152,7 @@ const initials = (name: string) => name.split(' ').map(part => part[0]).slice(0,
           <VCard>
             <VCardText>
               <h5 class="text-h5">
-                {{ formatCurrency(client.stats.total_spent) }}
+                {{ formatMoney(client.stats.total_spent) }}
               </h5>
               <p class="text-body-2 mb-0">
                 Total Spent
@@ -171,8 +168,8 @@ const initials = (name: string) => name.split(' ').map(part => part[0]).slice(0,
           :items="client.appointments"
           no-data-text="No appointments yet."
         >
-          <template #item.service.price="{ item }">
-            {{ formatCurrency(Number(item.service.price)) }}
+          <template #item.price="{ item }">
+            {{ formatMoney(item.price) }}
           </template>
 
           <template #item.starts_at="{ item }">
