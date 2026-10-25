@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { watchDebounced } from '@vueuse/core'
 import ListPaginationFooter from '@/components/ListPaginationFooter.vue'
+import { rolesApis } from '@/core/apis/roles.apis'
 import { staffApis } from '@/core/apis/staff.apis'
 import type { Staff, StaffRole } from '@/core/apis/types/staff.types'
 import { useAuthStore } from '@/stores/auth'
 
-// Patron Créer/Modifier : A. Modale intégrée à la liste (≤ 6 champs)
-
+const router = useRouter()
 const authStore = useAuthStore()
 
 const staff = ref<Staff[]>([])
@@ -20,26 +20,58 @@ const search = ref('')
 const roleFilter = ref<StaffRole | null>(null)
 
 const perPageOptions = [10, 25, 50, 100]
-const roleOptions: { title: string, value: StaffRole }[] = [
+const roleOptions = ref<{ title: string, value: StaffRole }[]>([
   { title: 'Owner', value: 'owner' },
   { title: 'Admin', value: 'admin' },
   { title: 'Staff', value: 'staff' },
-]
+])
 
-const roleColors: Record<StaffRole, string> = {
-  owner: 'primary',
-  admin: 'warning',
-  staff: 'info',
+const builtInRoleMeta: Record<string, { color: string, icon: string }> = {
+  owner: { color: 'primary', icon: 'bx-crown' },
+  admin: { color: 'warning', icon: 'bx-shield-quarter' },
+  staff: { color: 'info', icon: 'bx-user' },
 }
 
+const roleMeta = (role: StaffRole) => builtInRoleMeta[role] ?? { color: 'secondary', icon: 'bx-shield' }
+
+// Business can have custom roles beyond owner/admin/staff — pull the real
+// list so the filter dropdown and labels stay accurate.
+const fetchRoleOptions = async () => {
+  const res = await rolesApis.handleListRoles()
+
+  if (res.status.code === 200 && res.data) {
+    roleOptions.value = res.data.map(r => ({
+      title: r.name.charAt(0).toUpperCase() + r.name.slice(1),
+      value: r.name,
+    }))
+  }
+}
+
+fetchRoleOptions()
+
 const headers = [
-  { title: 'Name', key: 'name' },
-  { title: 'Email', key: 'email' },
+  { title: 'User', key: 'name' },
   { title: 'Role', key: 'role' },
   { title: 'Actions', key: 'actions', sortable: false, align: 'end' as const },
 ]
 
 const initials = (name: string) => name.split(' ').map(part => part[0]).slice(0, 2).join('').toUpperCase()
+
+// Stats are drawn from a broad, unfiltered fetch (independent of the paginated,
+// filtered table below) so they reflect overall headcount, not the current view.
+const stats = ref({ total: 0, owner: 0, admin: 0, staff: 0 })
+
+const fetchStats = async () => {
+  const res = await staffApis.handleListStaff({ per_page: 100 })
+  const all = res.data ?? []
+
+  stats.value = {
+    total: res.meta?.total ?? all.length,
+    owner: all.filter(s => s.role === 'owner').length,
+    admin: all.filter(s => s.role === 'admin').length,
+    staff: all.filter(s => s.role === 'staff').length,
+  }
+}
 
 const fetchStaff = async () => {
   isLoading.value = true
@@ -69,6 +101,7 @@ const fetchStaff = async () => {
   }
 }
 
+fetchStats()
 fetchStaff()
 
 watch([page, perPage, roleFilter], fetchStaff)
@@ -95,66 +128,6 @@ const exportCsv = () => {
   URL.revokeObjectURL(url)
 }
 
-const isDialogOpen = ref(false)
-const isSaving = ref(false)
-const editingId = ref<number | null>(null)
-const formErrors = ref<Record<string, string[]>>({})
-
-const emptyForm = () => ({
-  name: '',
-  email: '',
-  password: '',
-  role: 'staff' as StaffRole,
-})
-
-const form = ref(emptyForm())
-
-const openCreateDialog = () => {
-  editingId.value = null
-  form.value = emptyForm()
-  formErrors.value = {}
-  isDialogOpen.value = true
-}
-
-const openEditDialog = (member: Staff) => {
-  editingId.value = member.id
-  form.value = {
-    name: member.name,
-    email: member.email,
-    password: '',
-    role: member.role,
-  }
-  formErrors.value = {}
-  isDialogOpen.value = true
-}
-
-const saveStaff = async () => {
-  isSaving.value = true
-  formErrors.value = {}
-
-  try {
-    const payload = { ...form.value }
-
-    if (editingId.value && !payload.password)
-      delete (payload as Partial<typeof payload>).password
-
-    const res = editingId.value
-      ? await staffApis.handleUpdateStaff(editingId.value, payload)
-      : await staffApis.handleCreateStaff(payload)
-
-    if (res.status.code === 200 || res.status.code === 201) {
-      isDialogOpen.value = false
-      await fetchStaff()
-    }
-    else if (res.status.code === 422) {
-      formErrors.value = res.errors ?? {}
-    }
-  }
-  finally {
-    isSaving.value = false
-  }
-}
-
 const isDeleteDialogOpen = ref(false)
 const deletingId = ref<number | null>(null)
 const deleteErrorMessage = ref('')
@@ -173,7 +146,7 @@ const deleteStaff = async () => {
 
   if (res.status.code === 200) {
     isDeleteDialogOpen.value = false
-    await fetchStaff()
+    await Promise.all([fetchStaff(), fetchStats()])
   }
   else {
     deleteErrorMessage.value = res.status.message
@@ -182,6 +155,128 @@ const deleteStaff = async () => {
 </script>
 
 <template>
+  <VRow class="mb-6">
+    <VCol
+      cols="12"
+      sm="6"
+      md="3"
+    >
+      <VCard>
+        <VCardText class="d-flex justify-space-between">
+          <div class="d-flex flex-column gap-y-1">
+            <div class="text-body-1 text-high-emphasis">
+              Total Staff
+            </div>
+            <h4 class="text-h4">
+              {{ stats.total }}
+            </h4>
+            <div class="text-sm">
+              All staff members
+            </div>
+          </div>
+          <VAvatar
+            color="secondary"
+            variant="tonal"
+            rounded
+            size="40"
+          >
+            <VIcon icon="bx-group" />
+          </VAvatar>
+        </VCardText>
+      </VCard>
+    </VCol>
+
+    <VCol
+      cols="12"
+      sm="6"
+      md="3"
+    >
+      <VCard>
+        <VCardText class="d-flex justify-space-between">
+          <div class="d-flex flex-column gap-y-1">
+            <div class="text-body-1 text-high-emphasis">
+              Owners
+            </div>
+            <h4 class="text-h4">
+              {{ stats.owner }}
+            </h4>
+            <div class="text-sm">
+              Full access
+            </div>
+          </div>
+          <VAvatar
+            color="primary"
+            variant="tonal"
+            rounded
+            size="40"
+          >
+            <VIcon icon="bx-crown" />
+          </VAvatar>
+        </VCardText>
+      </VCard>
+    </VCol>
+
+    <VCol
+      cols="12"
+      sm="6"
+      md="3"
+    >
+      <VCard>
+        <VCardText class="d-flex justify-space-between">
+          <div class="d-flex flex-column gap-y-1">
+            <div class="text-body-1 text-high-emphasis">
+              Admins
+            </div>
+            <h4 class="text-h4">
+              {{ stats.admin }}
+            </h4>
+            <div class="text-sm">
+              Operational access
+            </div>
+          </div>
+          <VAvatar
+            color="warning"
+            variant="tonal"
+            rounded
+            size="40"
+          >
+            <VIcon icon="bx-shield-quarter" />
+          </VAvatar>
+        </VCardText>
+      </VCard>
+    </VCol>
+
+    <VCol
+      cols="12"
+      sm="6"
+      md="3"
+    >
+      <VCard>
+        <VCardText class="d-flex justify-space-between">
+          <div class="d-flex flex-column gap-y-1">
+            <div class="text-body-1 text-high-emphasis">
+              Staff
+            </div>
+            <h4 class="text-h4">
+              {{ stats.staff }}
+            </h4>
+            <div class="text-sm">
+              Limited access
+            </div>
+          </div>
+          <VAvatar
+            color="info"
+            variant="tonal"
+            rounded
+            size="40"
+          >
+            <VIcon icon="bx-user" />
+          </VAvatar>
+        </VCardText>
+      </VCard>
+    </VCol>
+  </VRow>
+
   <VCard
     title="Filters"
     class="mb-6"
@@ -233,7 +328,7 @@ const deleteStaff = async () => {
 
         <VBtn
           prepend-icon="bx-plus"
-          @click="openCreateDialog"
+          @click="router.push('/staff/add')"
         >
           New Staff Member
         </VBtn>
@@ -258,28 +353,33 @@ const deleteStaff = async () => {
       :items-per-page="perPage"
       hide-default-footer
       no-data-text="No staff yet. Add your first one."
+      class="text-no-wrap"
     >
       <template #item.name="{ item }">
-        <div class="d-flex align-center gap-x-3">
+        <div class="d-flex align-center gap-x-4">
           <VAvatar
-            size="32"
+            size="34"
             color="primary"
             variant="tonal"
           >
             <span class="text-sm">{{ initials(item.name) }}</span>
           </VAvatar>
-          {{ item.name }}
+          <div class="d-flex flex-column">
+            <span class="font-weight-medium">{{ item.name }}</span>
+            <span class="text-sm text-medium-emphasis">{{ item.email }}</span>
+          </div>
         </div>
       </template>
 
       <template #item.role="{ item }">
-        <VChip
-          :color="roleColors[item.role]"
-          size="small"
-          class="text-capitalize"
-        >
-          {{ item.role }}
-        </VChip>
+        <div class="d-flex align-center gap-x-2">
+          <VIcon
+            :icon="roleMeta(item.role).icon"
+            :color="roleMeta(item.role).color"
+            size="20"
+          />
+          <span class="text-capitalize text-high-emphasis">{{ item.role }}</span>
+        </div>
       </template>
 
       <template #item.actions="{ item }">
@@ -287,7 +387,7 @@ const deleteStaff = async () => {
           icon
           variant="text"
           size="small"
-          @click="openEditDialog(item)"
+          @click="router.push(`/staff/${item.id}/edit`)"
         >
           <VIcon icon="bx-edit" />
         </VBtn>
@@ -312,71 +412,6 @@ const deleteStaff = async () => {
       </template>
     </VDataTable>
   </VCard>
-
-  <!-- Create/Edit dialog -->
-  <VDialog
-    v-model="isDialogOpen"
-    max-width="500"
-  >
-    <VCard :title="editingId ? 'Edit Staff Member' : 'New Staff Member'">
-      <VCardText>
-        <VForm @submit.prevent="saveStaff">
-          <VRow>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.name"
-                label="Name"
-                :error-messages="formErrors.name"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.email"
-                type="email"
-                label="Email"
-                :error-messages="formErrors.email"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.password"
-                type="password"
-                :label="editingId ? 'New Password (leave blank to keep current)' : 'Password'"
-                :error-messages="formErrors.password"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VSelect
-                v-model="form.role"
-                label="Role"
-                :items="roleOptions"
-                :error-messages="formErrors.role"
-              />
-            </VCol>
-            <VCol
-              cols="12"
-              class="d-flex justify-end gap-3"
-            >
-              <VBtn
-                type="button"
-                variant="tonal"
-                color="secondary"
-                @click="isDialogOpen = false"
-              >
-                Cancel
-              </VBtn>
-              <VBtn
-                type="submit"
-                :loading="isSaving"
-              >
-                Save
-              </VBtn>
-            </VCol>
-          </VRow>
-        </VForm>
-      </VCardText>
-    </VCard>
-  </VDialog>
 
   <!-- Delete confirmation -->
   <VDialog

@@ -3,12 +3,9 @@ import { watchDebounced } from '@vueuse/core'
 import ListPaginationFooter from '@/components/ListPaginationFooter.vue'
 import { servicesApis } from '@/core/apis/services.apis'
 import type { Service } from '@/core/apis/types/services.types'
-import { useAuthStore } from '@/stores/auth'
-import { currencyDecimals, formatMoney, toMajorUnits } from '@/utils/money'
+import { formatMoney } from '@/utils/money'
 
-const authStore = useAuthStore()
-
-// Patron Créer/Modifier : A. Modale intégrée à la liste (≤ 6 champs)
+const router = useRouter()
 
 const services = ref<Service[]>([])
 const isLoading = ref(false)
@@ -100,67 +97,6 @@ const exportCsv = () => {
   URL.revokeObjectURL(url)
 }
 
-const isDialogOpen = ref(false)
-const isSaving = ref(false)
-const editingId = ref<number | null>(null)
-const formErrors = ref<Record<string, string[]>>({})
-
-const emptyForm = () => ({
-  name: '',
-  description: '',
-  category: '',
-  duration_minutes: 30,
-  price: 0,
-  color: '#7367F0',
-})
-
-const form = ref(emptyForm())
-
-const openCreateDialog = () => {
-  editingId.value = null
-  form.value = emptyForm()
-  formErrors.value = {}
-  isDialogOpen.value = true
-}
-
-const openEditDialog = (service: Service) => {
-  editingId.value = service.id
-  form.value = {
-    name: service.name,
-    description: service.description ?? '',
-    category: service.category ?? '',
-    duration_minutes: service.duration_minutes,
-    price: toMajorUnits(service.price),
-    color: service.color ?? '#7367F0',
-  }
-  formErrors.value = {}
-  isDialogOpen.value = true
-}
-
-const priceStep = computed(() => 10 ** -currencyDecimals(authStore.business?.currency_code ?? 'USD'))
-
-const saveService = async () => {
-  isSaving.value = true
-  formErrors.value = {}
-
-  try {
-    const res = editingId.value
-      ? await servicesApis.handleUpdateService(editingId.value, form.value)
-      : await servicesApis.handleCreateService(form.value)
-
-    if (res.status.code === 200 || res.status.code === 201) {
-      isDialogOpen.value = false
-      await fetchServices()
-    }
-    else if (res.status.code === 422) {
-      formErrors.value = res.errors ?? {}
-    }
-  }
-  finally {
-    isSaving.value = false
-  }
-}
-
 const isDeleteDialogOpen = ref(false)
 const deletingId = ref<number | null>(null)
 
@@ -242,7 +178,7 @@ const deleteService = async () => {
 
         <VBtn
           prepend-icon="bx-plus"
-          @click="openCreateDialog"
+          @click="router.push('/services/add')"
         >
           New Service
         </VBtn>
@@ -294,7 +230,7 @@ const deleteService = async () => {
           icon
           variant="text"
           size="small"
-          @click="openEditDialog(item)"
+          @click="router.push(`/services/${item.id}/edit`)"
         >
           <VIcon icon="bx-edit" />
         </VBtn>
@@ -318,90 +254,6 @@ const deleteService = async () => {
       </template>
     </VDataTable>
   </VCard>
-
-  <!-- Create/Edit dialog -->
-  <VDialog
-    v-model="isDialogOpen"
-    max-width="500"
-  >
-    <VCard :title="editingId ? 'Edit Service' : 'New Service'">
-      <VCardText>
-        <VForm @submit.prevent="saveService">
-          <VRow>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.name"
-                label="Name"
-                :error-messages="formErrors.name"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextarea
-                v-model="form.description"
-                label="Description"
-                rows="2"
-                :error-messages="formErrors.description"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VCombobox
-                v-model="form.category"
-                label="Category"
-                :items="categories"
-                clearable
-                :error-messages="formErrors.category"
-              />
-            </VCol>
-            <VCol cols="6">
-              <VTextField
-                v-model.number="form.duration_minutes"
-                type="number"
-                label="Duration (minutes)"
-                :error-messages="formErrors.duration_minutes"
-              />
-            </VCol>
-            <VCol cols="6">
-              <VTextField
-                v-model.number="form.price"
-                type="number"
-                :step="priceStep"
-                min="0"
-                label="Price"
-                :error-messages="formErrors.price"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.color"
-                type="color"
-                label="Color"
-                :error-messages="formErrors.color"
-              />
-            </VCol>
-            <VCol
-              cols="12"
-              class="d-flex justify-end gap-3"
-            >
-              <VBtn
-                type="button"
-                variant="tonal"
-                color="secondary"
-                @click="isDialogOpen = false"
-              >
-                Cancel
-              </VBtn>
-              <VBtn
-                type="submit"
-                :loading="isSaving"
-              >
-                Save
-              </VBtn>
-            </VCol>
-          </VRow>
-        </VForm>
-      </VCardText>
-    </VCard>
-  </VDialog>
 
   <!-- Delete confirmation -->
   <VDialog

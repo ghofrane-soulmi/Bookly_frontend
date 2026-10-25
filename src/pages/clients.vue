@@ -4,7 +4,7 @@ import ListPaginationFooter from '@/components/ListPaginationFooter.vue'
 import { clientsApis } from '@/core/apis/clients.apis'
 import type { Client } from '@/core/apis/types/clients.types'
 
-// Patron Créer/Modifier : A. Modale intégrée à la liste (≤ 6 champs)
+const router = useRouter()
 
 const clients = ref<Client[]>([])
 const isLoading = ref(false)
@@ -77,61 +77,6 @@ const exportCsv = () => {
   URL.revokeObjectURL(url)
 }
 
-const isDialogOpen = ref(false)
-const isSaving = ref(false)
-const editingId = ref<number | null>(null)
-const formErrors = ref<Record<string, string[]>>({})
-
-const emptyForm = () => ({
-  name: '',
-  email: '',
-  phone: '',
-  notes: '',
-})
-
-const form = ref(emptyForm())
-
-const openCreateDialog = () => {
-  editingId.value = null
-  form.value = emptyForm()
-  formErrors.value = {}
-  isDialogOpen.value = true
-}
-
-const openEditDialog = (client: Client) => {
-  editingId.value = client.id
-  form.value = {
-    name: client.name,
-    email: client.email ?? '',
-    phone: client.phone ?? '',
-    notes: client.notes ?? '',
-  }
-  formErrors.value = {}
-  isDialogOpen.value = true
-}
-
-const saveClient = async () => {
-  isSaving.value = true
-  formErrors.value = {}
-
-  try {
-    const res = editingId.value
-      ? await clientsApis.handleUpdateClient(editingId.value, form.value)
-      : await clientsApis.handleCreateClient(form.value)
-
-    if (res.status.code === 200 || res.status.code === 201) {
-      isDialogOpen.value = false
-      await fetchClients()
-    }
-    else if (res.status.code === 422) {
-      formErrors.value = res.errors ?? {}
-    }
-  }
-  finally {
-    isSaving.value = false
-  }
-}
-
 const isDeleteDialogOpen = ref(false)
 const deletingId = ref<number | null>(null)
 
@@ -181,7 +126,7 @@ const deleteClient = async () => {
 
         <VBtn
           prepend-icon="bx-plus"
-          @click="openCreateDialog"
+          @click="router.push('/clients/add')"
         >
           New Client
         </VBtn>
@@ -228,7 +173,7 @@ const deleteClient = async () => {
           icon
           variant="text"
           size="small"
-          @click="openEditDialog(item)"
+          @click="router.push(`/clients/${item.id}/edit`)"
         >
           <VIcon icon="bx-edit" />
         </VBtn>
@@ -252,70 +197,6 @@ const deleteClient = async () => {
       </template>
     </VDataTable>
   </VCard>
-
-  <!-- Create/Edit dialog -->
-  <VDialog
-    v-model="isDialogOpen"
-    max-width="500"
-  >
-    <VCard :title="editingId ? 'Edit Client' : 'New Client'">
-      <VCardText>
-        <VForm @submit.prevent="saveClient">
-          <VRow>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.name"
-                label="Name"
-                :error-messages="formErrors.name"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.email"
-                type="email"
-                label="Email"
-                :error-messages="formErrors.email"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextField
-                v-model="form.phone"
-                label="Phone"
-                :error-messages="formErrors.phone"
-              />
-            </VCol>
-            <VCol cols="12">
-              <VTextarea
-                v-model="form.notes"
-                label="Notes"
-                rows="3"
-                :error-messages="formErrors.notes"
-              />
-            </VCol>
-            <VCol
-              cols="12"
-              class="d-flex justify-end gap-3"
-            >
-              <VBtn
-                type="button"
-                variant="tonal"
-                color="secondary"
-                @click="isDialogOpen = false"
-              >
-                Cancel
-              </VBtn>
-              <VBtn
-                type="submit"
-                :loading="isSaving"
-              >
-                Save
-              </VBtn>
-            </VCol>
-          </VRow>
-        </VForm>
-      </VCardText>
-    </VCard>
-  </VDialog>
 
   <!-- Delete confirmation -->
   <VDialog
