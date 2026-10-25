@@ -6,13 +6,15 @@ export interface AuthUser {
   business_id: number
   name: string
   email: string
-  role: 'owner' | 'admin' | 'staff'
+  role: 'owner' | 'admin' | 'staff' | (string & {})
 }
 
 export interface AuthBusiness {
   id: number
   name: string
   slug: string
+  email: string | null
+  phone: string | null
   timezone: string
   currency_code: string
 }

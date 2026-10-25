@@ -1,6 +1,8 @@
 import type { ApiEnvelope } from './services.types'
 
-export type StaffRole = 'owner' | 'admin' | 'staff'
+// Built-in role names; custom roles (created via Roles & Permissions) are
+// also valid here but their names aren't known statically.
+export type StaffRole = 'owner' | 'admin' | 'staff' | (string & {})
 
 export interface Staff {
   id: number

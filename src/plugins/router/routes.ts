@@ -14,8 +14,24 @@ export const routes = [
         component: () => import('@/pages/services.vue'),
       },
       {
+        path: 'services/add',
+        component: () => import('@/pages/service-add.vue'),
+      },
+      {
+        path: 'services/:id/edit',
+        component: () => import('@/pages/service-add.vue'),
+      },
+      {
         path: 'clients',
         component: () => import('@/pages/clients.vue'),
+      },
+      {
+        path: 'clients/add',
+        component: () => import('@/pages/client-add.vue'),
+      },
+      {
+        path: 'clients/:id/edit',
+        component: () => import('@/pages/client-add.vue'),
       },
       {
         path: 'clients/:id',
@@ -26,6 +42,14 @@ export const routes = [
         component: () => import('@/pages/appointments.vue'),
       },
       {
+        path: 'appointments/add',
+        component: () => import('@/pages/appointment-add.vue'),
+      },
+      {
+        path: 'appointments/:id/edit',
+        component: () => import('@/pages/appointment-add.vue'),
+      },
+      {
         path: 'calendar',
         component: () => import('@/pages/calendar.vue'),
       },
@@ -34,28 +58,48 @@ export const routes = [
         component: () => import('@/pages/staff.vue'),
       },
       {
+        path: 'staff/add',
+        component: () => import('@/pages/staff-add.vue'),
+      },
+      {
+        path: 'staff/:id/edit',
+        component: () => import('@/pages/staff-add.vue'),
+      },
+      {
+        path: 'roles',
+        component: () => import('@/pages/roles.vue'),
+      },
+      {
+        path: 'roles/add',
+        component: () => import('@/pages/role-add.vue'),
+      },
+      {
+        path: 'roles/:id/edit',
+        component: () => import('@/pages/role-add.vue'),
+      },
+      {
+        path: 'permissions',
+        component: () => import('@/pages/permissions.vue'),
+      },
+      {
+        path: 'invoices',
+        component: () => import('@/pages/invoices.vue'),
+      },
+      {
+        path: 'invoices/add',
+        component: () => import('@/pages/invoice-add.vue'),
+      },
+      {
+        path: 'invoices/:id/edit',
+        component: () => import('@/pages/invoice-add.vue'),
+      },
+      {
+        path: 'invoices/:id/preview',
+        component: () => import('@/pages/invoice-preview.vue'),
+      },
+      {
         path: 'account-settings',
         component: () => import('@/pages/account-settings.vue'),
-      },
-      {
-        path: 'typography',
-        component: () => import('@/pages/typography.vue'),
-      },
-      {
-        path: 'icons',
-        component: () => import('@/pages/icons.vue'),
-      },
-      {
-        path: 'cards',
-        component: () => import('@/pages/cards.vue'),
-      },
-      {
-        path: 'tables',
-        component: () => import('@/pages/tables.vue'),
-      },
-      {
-        path: 'form-layouts',
-        component: () => import('@/pages/form-layouts.vue'),
       },
     ],
   },
