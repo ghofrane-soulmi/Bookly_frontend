@@ -1,677 +1,418 @@
 <script setup lang="ts">
+import { invoicesApis } from '@/core/apis/invoices.apis'
+import type { InvoicePayload } from '@/core/apis/types/invoices.types'
 import { useAuthStore } from '@/stores/auth'
-import { invoiceTotals, mockClients, mockServiceItems, useInvoicesStore, type Invoice, type InvoiceClient, type InvoiceItem, type InvoiceStatus } from '@/stores/invoices'
-import { formatMoney } from '@/utils/money'
+import { api } from '@/utils/api'
+import { currencyDecimals, formatMoney } from '@/utils/money'
+import type { Money } from '@/utils/money'
 
-// One page for both Create and Edit: the presence of `:id` in the route
-// decides the mode. Saving in create mode redirects to the edit URL for the
-// newly-created invoice, so a subsequent Save/Send updates it in place.
+interface Option { id: number; name: string }
+interface ServiceOption extends Option { price: Money | null }
+interface Line { key: number; description: string; quantity: number; unit_price: number | string; service_id: number | null }
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const invoicesStore = useInvoicesStore()
 
-const editingId = computed(() => (route.params.id ? Number(route.params.id) : null))
-const existingInvoice = computed(() => (editingId.value ? invoicesStore.getById(editingId.value) : null))
-
+const invoiceId = computed(() => (route.params.id ? Number(route.params.id) : null))
+const isEdit = computed(() => invoiceId.value !== null)
 const currency = computed(() => authStore.business?.currency_code ?? 'USD')
-const invoiceNumber = computed(() => existingInvoice.value?.number ?? invoicesStore.nextNumber())
+const decimals = computed(() => currencyDecimals(currency.value))
+const priceStep = computed(() => 10 ** -decimals.value)
 
-const businessBank = {
-  bankName: 'Bookly Business Bank',
-  country: 'United States',
-  iban: 'BK00 0000 0000',
-  swift: 'BOOKLYXX',
-}
+const today = () => new Date().toLocaleDateString('en-CA')
+const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toLocaleDateString('en-CA')
 
-let localItemId = 1
-const makeEmptyItem = (): InvoiceItem => ({ id: localItemId++, name: '', description: '', cost: 0, hours: 1 })
-const emptyClient = (): InvoiceClient => ({ name: '', email: '', company: '', address: '', phone: '' })
+let lineKey = 0
+const newLine = (): Line => ({ key: ++lineKey, description: '', quantity: 1, unit_price: '', service_id: null })
 
-function buildInitialForm() {
-  const invoice = existingInvoice.value
-
-  if (invoice) {
-    return {
-      client: { ...invoice.client },
-      items: invoice.items.map(item => ({ ...item })),
-      issuedDate: invoice.issuedDate,
-      dueDate: invoice.dueDate,
-      discountPercent: invoice.discountPercent,
-      taxPercent: invoice.taxPercent,
-      amountPaid: invoice.amountPaid,
-      salesperson: invoice.salesperson,
-      thanksNote: invoice.thanksNote,
-      note: invoice.note,
-      paymentMethod: invoice.paymentMethod,
-      status: invoice.status,
-    }
-  }
-
-  return {
-    client: emptyClient(),
-    items: [makeEmptyItem()],
-    issuedDate: new Date().toISOString().slice(0, 10),
-    dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-    discountPercent: 0,
-    taxPercent: 0,
-    amountPaid: 0,
-    salesperson: '',
-    thanksNote: 'Thanks for your business',
-    note: '',
-    paymentMethod: 'Bank Account',
-    status: 'draft' as InvoiceStatus,
-  }
-}
-
-const form = reactive(buildInitialForm())
-
-const selectedClientEmail = computed({
-  get: () => form.client.email || null,
-  set: (email: string | null) => {
-    const found = mockClients.find(client => client.email === email)
-
-    if (found)
-      form.client = { ...found }
-  },
+const form = ref({
+  client_id: null as number | null,
+  issued_on: today(),
+  due_on: inDays(14),
+  discount_percent: 0,
+  tax_percent: 0,
+  notes: '',
 })
 
-const serviceItemNames = mockServiceItems.map(item => item.name)
+const lines = ref<Line[]>([newLine()])
 
-const selectServiceItem = (item: InvoiceItem, name: string | null) => {
-  const found = mockServiceItems.find(service => service.name === name)
+const invoiceNumber = ref<number | null>(null)
+const clients = ref<Option[]>([])
+const services = ref<ServiceOption[]>([])
+const isLoading = ref(true)
+const isSaving = ref(false)
+const errorMessage = ref('')
+const formErrors = ref<Record<string, string[]>>({})
 
-  item.name = name ?? ''
+const load = async () => {
+  isLoading.value = true
 
-  if (found) {
-    item.description = found.description
-    item.cost = found.cost
+  try {
+    const [clientsRes, servicesRes] = await Promise.all([api.get('/clients/list'), api.get('/services/list')])
+
+    clients.value = clientsRes.data.data
+    services.value = servicesRes.data.data
+
+    if (route.query.client_id)
+      form.value.client_id = Number(route.query.client_id)
+
+    if (invoiceId.value) {
+      const res = await invoicesApis.handleGetInvoice(invoiceId.value)
+
+      if (res.status.code !== 200) {
+        errorMessage.value = res.status.message
+
+        return
+      }
+
+      const invoice = res.data
+
+      invoiceNumber.value = invoice.number
+      form.value = {
+        client_id: invoice.client_id,
+        issued_on: invoice.issued_on,
+        due_on: invoice.due_on,
+        discount_percent: invoice.discount_percent,
+        tax_percent: invoice.tax_percent,
+        notes: invoice.notes ?? '',
+      }
+      lines.value = (invoice.items ?? []).map(item => ({
+        key: ++lineKey,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price / 10 ** decimals.value,
+        service_id: item.service_id,
+      }))
+    }
+  }
+  catch {
+    errorMessage.value = 'The invoice form could not be loaded. Please try again.'
+  }
+  finally {
+    isLoading.value = false
   }
 }
 
-const addItem = () => form.items.push(makeEmptyItem())
-const removeItem = (id: number) => {
-  if (form.items.length > 1)
-    form.items = form.items.filter(item => item.id !== id)
-}
+load()
 
-const totals = computed(() => invoiceTotals(form, currency.value))
-const itemPrice = (item: InvoiceItem) => formatMoney({ amount: Math.round(item.cost * item.hours * 100), currency: currency.value })
+const pickService = (line: Line, serviceId: number | null) => {
+  line.service_id = serviceId
 
-const formatDate = (isoDate: string) => new Date(`${isoDate}T00:00:00`).toLocaleDateString('en-US', { dateStyle: 'medium' })
+  const service = services.value.find(s => s.id === serviceId)
 
-function buildPayload(status: InvoiceStatus): Omit<Invoice, 'id' | 'number'> {
-  return {
-    status,
-    client: { ...form.client },
-    items: form.items.map(item => ({ ...item })),
-    issuedDate: form.issuedDate,
-    dueDate: form.dueDate,
-    discountPercent: form.discountPercent,
-    taxPercent: form.taxPercent,
-    amountPaid: form.amountPaid,
-    salesperson: form.salesperson,
-    thanksNote: form.thanksNote,
-    note: form.note,
-    paymentMethod: form.paymentMethod,
+  if (service) {
+    line.description = service.name
+    line.unit_price = service.price ? service.price.amount / 10 ** decimals.value : 0
   }
 }
 
-/** Saves the current form and returns the invoice's id, creating it if this is a new invoice. */
-const persist = (status: InvoiceStatus): number => {
-  const payload = buildPayload(status)
+const addLine = () => lines.value.push(newLine())
 
-  if (editingId.value) {
-    invoicesStore.update(editingId.value, payload)
+const removeLine = (key: number) => {
+  lines.value = lines.value.filter(line => line.key !== key)
+  if (!lines.value.length)
+    addLine()
+}
 
-    return editingId.value
+// Live preview only; the API recomputes and stores the real totals.
+const toMinor = (value: number | string) => Math.round((Number(value) || 0) * 10 ** decimals.value)
+const lineTotal = (line: Line) => Math.round(toMinor(line.unit_price) * (Number(line.quantity) || 0))
+
+const totals = computed(() => {
+  const subtotal = lines.value.reduce((sum, line) => sum + lineTotal(line), 0)
+  const discount = Math.round(subtotal * (Number(form.value.discount_percent) || 0) / 100)
+  const tax = Math.round((subtotal - discount) * (Number(form.value.tax_percent) || 0) / 100)
+  const money = (amount: number): Money => ({ amount, currency: currency.value })
+
+  return { subtotal: money(subtotal), discount: money(discount), tax: money(tax), total: money(subtotal - discount + tax) }
+})
+
+const lineError = (index: number, field: string) => formErrors.value[`items.${index}.${field}`]
+
+const save = async () => {
+  isSaving.value = true
+  errorMessage.value = ''
+  formErrors.value = {}
+
+  const payload: InvoicePayload = {
+    client_id: form.value.client_id as number,
+    issued_on: form.value.issued_on,
+    due_on: form.value.due_on,
+    discount_percent: Number(form.value.discount_percent) || 0,
+    tax_percent: Number(form.value.tax_percent) || 0,
+    notes: form.value.notes || null,
+    items: lines.value.map(line => ({
+      description: line.description,
+      quantity: Number(line.quantity),
+      unit_price: line.unit_price === '' ? '' : String(line.unit_price),
+      service_id: line.service_id,
+    })),
   }
 
-  const created = invoicesStore.create(payload)
+  try {
+    const res = invoiceId.value
+      ? await invoicesApis.handleUpdateInvoice(invoiceId.value, payload)
+      : await invoicesApis.handleCreateInvoice(payload)
 
-  router.replace(`/invoices/${created.id}/edit`)
-
-  return created.id
+    if ([200, 201].includes(res.status.code))
+      router.push(`/invoices/${res.data.id}/preview`)
+    else if (res.errors)
+      formErrors.value = res.errors
+    else
+      errorMessage.value = res.status.message
+  }
+  catch {
+    errorMessage.value = 'The invoice could not be saved. Please try again.'
+  }
+  finally {
+    isSaving.value = false
+  }
 }
-
-const saveAndExit = () => {
-  persist(form.status)
-  router.push('/invoices')
-}
-
-const openPreview = () => {
-  const id = persist(form.status)
-
-  router.push(`/invoices/${id}/preview`)
-}
-
-const isSendDrawerOpen = ref(false)
-const sendForm = reactive({ from: '', to: '', subject: '', message: '' })
-
-const openSendDrawer = () => {
-  sendForm.from = authStore.business?.email ?? ''
-  sendForm.to = form.client.email
-  sendForm.subject = `Invoice #${invoiceNumber.value} from ${authStore.business?.name ?? 'Bookly'}`
-  sendForm.message = `Dear ${form.client.name || 'Customer'},\n\n${form.thanksNote}\n\nWe have generated a new invoice in the amount of ${formatMoney(totals.value.total)}.\n\nWe would appreciate payment of this invoice by ${formatDate(form.dueDate)}.`
-  isSendDrawerOpen.value = true
-}
-
-const sendInvoice = () => {
-  const id = persist(form.status)
-
-  invoicesStore.markSent(id)
-  isSendDrawerOpen.value = false
-  router.push('/invoices')
-}
-
-const paymentTerms = ref(true)
-const clientNotes = ref(false)
-const paymentStub = ref(false)
 </script>
 
 <template>
-  <VRow>
-    <VCol
-      cols="12"
-      md="9"
-    >
-      <VCard class="pa-6 pa-sm-12">
-        <div class="d-flex flex-wrap justify-space-between flex-column bg-surface rounded flex-sm-row gap-6 pa-6 mb-6">
-          <div>
-            <h6 class="text-h6 mb-4">
-              {{ authStore.business?.name ?? 'Bookly' }}
-            </h6>
-            <p
-              v-if="authStore.business?.email"
-              class="text-high-emphasis mb-0 text-body-1"
-            >
-              {{ authStore.business.email }}
-            </p>
-            <p
-              v-if="authStore.business?.phone"
-              class="text-high-emphasis mb-0 text-body-1"
-            >
-              {{ authStore.business.phone }}
-            </p>
-          </div>
+  <PageLoader
+    v-if="isLoading"
+    text="Loading invoice…"
+  />
 
-          <div class="d-flex flex-column gap-2">
-            <div class="d-flex align-start align-sm-center gap-x-4 font-weight-medium text-h5 flex-column flex-sm-row">
-              <span
-                class="text-high-emphasis text-sm-end"
-                style="inline-size: 5.625rem;"
-              >Invoice</span>
-              <VTextField
-                :model-value="invoiceNumber"
-                prefix="#"
-                disabled
-                style="inline-size: 9.5rem;"
-              />
-            </div>
-            <div class="d-flex gap-x-4 align-start align-sm-center flex-column flex-sm-row">
-              <span
-                class="text-high-emphasis text-body-1 text-sm-end"
-                style="inline-size: 5.625rem;"
-              >Date Issued:</span>
-              <VTextField
-                v-model="form.issuedDate"
-                type="date"
-                style="inline-size: 9.5rem;"
-              />
-            </div>
-            <div class="d-flex gap-x-4 align-start align-sm-center flex-column flex-sm-row">
-              <span
-                class="text-high-emphasis text-body-1 text-sm-end"
-                style="inline-size: 5.625rem;"
-              >Due Date:</span>
-              <VTextField
-                v-model="form.dueDate"
-                type="date"
-                style="inline-size: 9.5rem;"
-              />
-            </div>
-          </div>
-        </div>
+  <VForm
+    v-else
+    @submit.prevent="save"
+  >
+    <VRow>
+      <VCol
+        cols="12"
+        lg="9"
+      >
+        <VCard>
+          <VCardItem>
+            <VCardTitle>{{ isEdit ? `Edit invoice #${invoiceNumber}` : 'New invoice' }}</VCardTitle>
+            <VCardSubtitle>Prices in {{ currency }}. Totals are recalculated when you save.</VCardSubtitle>
+          </VCardItem>
 
-        <VRow>
-          <VCol
-            cols="12"
-            md="6"
-            class="text-no-wrap"
-          >
-            <h6 class="text-h6 mb-4">
-              Invoice To:
-            </h6>
-            <VSelect
-              v-model="selectedClientEmail"
-              :items="mockClients"
-              item-title="name"
-              item-value="email"
-              placeholder="Select client"
-              clearable
+          <VCardText>
+            <VAlert
+              v-if="errorMessage"
+              type="error"
+              variant="tonal"
               class="mb-4"
-              style="inline-size: 11.875rem;"
+              :text="errorMessage"
             />
-            <p
-              v-if="form.client.name"
-              class="mb-0 text-body-1"
-            >
-              {{ form.client.name }}
-            </p>
-            <p
-              v-if="form.client.phone"
-              class="mb-0 text-body-1"
-            >
-              {{ form.client.phone }}
-            </p>
-            <p
-              v-if="form.client.email"
-              class="mb-0 text-body-1"
-            >
-              {{ form.client.email }}
-            </p>
-          </VCol>
 
-          <VCol
-            cols="12"
-            md="6"
-            class="text-no-wrap"
-          >
-            <h6 class="text-h6 mb-4">
-              Bill To:
-            </h6>
-            <table>
-              <tbody class="text-body-1">
-                <tr>
-                  <td class="pe-4">
-                    Total Due:
-                  </td>
-                  <td>{{ formatMoney(totals.total) }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    Bank Name:
-                  </td>
-                  <td>{{ businessBank.bankName }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    Country:
-                  </td>
-                  <td>{{ businessBank.country }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    IBAN:
-                  </td>
-                  <td>{{ businessBank.iban }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    SWIFT Code:
-                  </td>
-                  <td>{{ businessBank.swift }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </VCol>
-        </VRow>
-
-        <VDivider class="my-6 border-dashed" />
-
-        <div class="mb-4">
-          <div class="d-none d-md-flex mb-4">
-            <VRow class="me-10 w-100">
+            <VRow>
               <VCol
                 cols="12"
                 md="6"
               >
-                <h6 class="text-h6">
-                  Item
-                </h6>
+                <VAutocomplete
+                  v-model="form.client_id"
+                  :items="clients"
+                  item-title="name"
+                  item-value="id"
+                  label="Client"
+                  placeholder="Choose a client"
+                  :error-messages="formErrors.client_id"
+                />
               </VCol>
               <VCol
-                cols="12"
-                md="2"
+                cols="6"
+                md="3"
               >
-                <h6 class="text-h6 ps-2">
-                  Cost
-                </h6>
+                <VTextField
+                  v-model="form.issued_on"
+                  type="date"
+                  label="Issued on"
+                  :error-messages="formErrors.issued_on"
+                />
               </VCol>
               <VCol
-                cols="12"
-                md="2"
+                cols="6"
+                md="3"
               >
-                <h6 class="text-h6 ps-2">
-                  Hours
-                </h6>
-              </VCol>
-              <VCol
-                cols="12"
-                md="2"
-              >
-                <h6 class="text-h6">
-                  Price
-                </h6>
+                <VTextField
+                  v-model="form.due_on"
+                  type="date"
+                  label="Due on"
+                  :error-messages="formErrors.due_on"
+                />
               </VCol>
             </VRow>
-          </div>
+          </VCardText>
 
-          <VCard
-            v-for="item in form.items"
-            :key="item.id"
-            variant="outlined"
-            class="d-flex flex-sm-row flex-column-reverse mb-4"
-          >
-            <div class="pa-6 flex-grow-1">
+          <VDivider />
+
+          <VCardText>
+            <h6 class="text-h6 mb-4">
+              Items
+            </h6>
+            <VAlert
+              v-if="formErrors.items"
+              type="error"
+              variant="tonal"
+              density="compact"
+              class="mb-4"
+              :text="formErrors.items[0]"
+            />
+
+            <div
+              v-for="(line, index) in lines"
+              :key="line.key"
+              class="border rounded pa-4 mb-4"
+            >
               <VRow>
                 <VCol
                   cols="12"
-                  md="6"
+                  md="5"
                 >
                   <VSelect
-                    :model-value="item.name"
-                    :items="serviceItemNames"
-                    placeholder="Select item"
-                    class="mb-4"
-                    @update:model-value="(value: string | null) => selectServiceItem(item, value)"
+                    :model-value="line.service_id"
+                    :items="services"
+                    item-title="name"
+                    item-value="id"
+                    label="Service (optional)"
+                    clearable
+                    class="mb-3"
+                    @update:model-value="(v: number | null) => pickService(line, v)"
                   />
-                  <VTextarea
-                    v-model="item.description"
-                    placeholder="Item description"
-                    rows="2"
+                  <VTextField
+                    v-model="line.description"
+                    label="Description"
+                    :error-messages="lineError(index, 'description')"
                   />
                 </VCol>
                 <VCol
-                  cols="12"
-                  sm="4"
+                  cols="6"
                   md="2"
                 >
                   <VTextField
-                    v-model.number="item.cost"
+                    v-model.number="line.quantity"
                     type="number"
-                    min="0"
-                    placeholder="Cost"
-                    class="mb-4"
+                    min="0.01"
+                    step="1"
+                    label="Qty"
+                    :error-messages="lineError(index, 'quantity')"
                   />
                 </VCol>
                 <VCol
-                  cols="12"
-                  sm="4"
-                  md="2"
+                  cols="6"
+                  md="3"
                 >
                   <VTextField
-                    v-model.number="item.hours"
+                    v-model="line.unit_price"
                     type="number"
                     min="0"
-                    placeholder="Hours"
+                    :step="priceStep"
+                    label="Unit price"
+                    :suffix="currency"
+                    :error-messages="lineError(index, 'unit_price')"
                   />
                 </VCol>
                 <VCol
                   cols="12"
-                  sm="4"
                   md="2"
+                  class="d-flex flex-md-column align-center align-md-end justify-space-between"
                 >
-                  <p class="my-2">
-                    <span class="d-inline d-md-none">Price: </span>
-                    <span class="text-high-emphasis">{{ itemPrice(item) }}</span>
-                  </p>
+                  <span class="text-body-1 font-weight-medium">{{ formatMoney({ amount: lineTotal(line), currency }) }}</span>
+                  <VBtn
+                    icon
+                    variant="text"
+                    size="small"
+                    color="error"
+                    aria-label="Remove line"
+                    @click="removeLine(line.key)"
+                  >
+                    <VIcon icon="bx-trash" />
+                  </VBtn>
                 </VCol>
               </VRow>
             </div>
-            <div class="d-flex flex-column align-end border-s">
-              <VBtn
-                icon
-                variant="text"
-                @click="removeItem(item.id)"
-              >
-                <VIcon icon="bx-x" />
-              </VBtn>
-            </div>
-          </VCard>
 
-          <VBtn
-            size="small"
-            prepend-icon="bx-plus"
-            @click="addItem"
-          >
-            Add Item
-          </VBtn>
-        </div>
-
-        <VDivider class="my-6 border-dashed" />
-
-        <div class="d-flex justify-space-between flex-wrap flex-column flex-sm-row">
-          <div class="mb-6 mb-sm-0">
-            <div class="d-flex align-center mb-4">
-              <h6 class="text-h6 me-2">
-                Salesperson:
-              </h6>
-              <VTextField
-                v-model="form.salesperson"
-                placeholder="John Doe"
-                style="inline-size: 8rem;"
-              />
-            </div>
-            <VTextField
-              v-model="form.thanksNote"
-              placeholder="Thanks for your business"
-            />
-          </div>
-
-          <div style="inline-size: 15.625rem;">
-            <table class="w-100">
-              <tbody class="text-body-1">
-                <tr>
-                  <td class="pe-16">
-                    Subtotal:
-                  </td>
-                  <td class="text-end">
-                    <h6 class="text-h6">
-                      {{ formatMoney(totals.subtotal) }}
-                    </h6>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="pe-16">
-                    Discount:
-                  </td>
-                  <td class="text-end">
-                    <VTextField
-                      v-model.number="form.discountPercent"
-                      type="number"
-                      min="0"
-                      max="100"
-                      suffix="%"
-                      density="compact"
-                    />
-                  </td>
-                </tr>
-                <tr>
-                  <td class="pe-16">
-                    Tax:
-                  </td>
-                  <td class="text-end">
-                    <VTextField
-                      v-model.number="form.taxPercent"
-                      type="number"
-                      min="0"
-                      max="100"
-                      suffix="%"
-                      density="compact"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <VDivider class="my-2" />
-            <table class="w-100">
-              <tbody>
-                <tr>
-                  <td class="pe-16 text-body-1">
-                    Total:
-                  </td>
-                  <td class="text-end">
-                    <h6 class="text-h6">
-                      {{ formatMoney(totals.total) }}
-                    </h6>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <VDivider class="my-6 border-dashed" />
-
-        <div>
-          <h6 class="text-h6 font-weight-regular mb-1">
-            Note:
-          </h6>
-          <VTextarea
-            v-model="form.note"
-            placeholder="Write note here..."
-            rows="2"
-          />
-        </div>
-      </VCard>
-    </VCol>
-
-    <VCol
-      cols="12"
-      md="3"
-    >
-      <VCard class="mb-6">
-        <VCardText>
-          <VBtn
-            block
-            prepend-icon="bx-paper-plane"
-            class="mb-4"
-            @click="openSendDrawer"
-          >
-            Send Invoice
-          </VBtn>
-          <VBtn
-            block
-            variant="tonal"
-            color="secondary"
-            class="mb-4"
-            @click="openPreview"
-          >
-            Preview
-          </VBtn>
-          <VBtn
-            block
-            variant="tonal"
-            color="secondary"
-            @click="saveAndExit"
-          >
-            Save
-          </VBtn>
-        </VCardText>
-
-        <VCardText>
-          <VSelect
-            v-model="form.paymentMethod"
-            label="Accept Payment Via"
-            :items="['Bank Account', 'PayPal', 'Cash', 'Stripe']"
-            class="mb-4"
-          />
-
-          <div class="d-flex align-center justify-space-between mb-2">
-            <span class="text-body-1">Payment Terms</span>
-            <VSwitch v-model="paymentTerms" />
-          </div>
-          <div class="d-flex align-center justify-space-between mb-2">
-            <span class="text-body-1">Client Notes</span>
-            <VSwitch v-model="clientNotes" />
-          </div>
-          <div class="d-flex align-center justify-space-between">
-            <span class="text-body-1">Payment Stub</span>
-            <VSwitch v-model="paymentStub" />
-          </div>
-        </VCardText>
-      </VCard>
-    </VCol>
-  </VRow>
-
-  <!-- Send Invoice -->
-  <VNavigationDrawer
-    v-model="isSendDrawerOpen"
-    location="end"
-    temporary
-    width="400"
-  >
-    <div class="px-6 py-5 d-flex align-center">
-      <h5 class="text-h5">
-        Send Invoice
-      </h5>
-      <VSpacer />
-      <VBtn
-        icon
-        variant="text"
-        @click="isSendDrawerOpen = false"
-      >
-        <VIcon icon="bx-x" />
-      </VBtn>
-    </div>
-    <VDivider />
-    <VCardText>
-      <VForm @submit.prevent="sendInvoice">
-        <VRow>
-          <VCol cols="12">
-            <VTextField
-              v-model="sendForm.from"
-              label="From"
-              placeholder="sender@email.com"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextField
-              v-model="sendForm.to"
-              label="To"
-              placeholder="receiver@email.com"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextField
-              v-model="sendForm.subject"
-              label="Subject"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextarea
-              v-model="sendForm.message"
-              label="Message"
-              rows="8"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VChip
-              color="primary"
+            <VBtn
               variant="tonal"
-              size="small"
-              class="mb-4"
-              prepend-icon="bx-link"
+              prepend-icon="bx-plus"
+              @click="addLine"
             >
-              Invoice Attached
-            </VChip>
-            <div class="d-flex gap-3">
-              <VBtn type="submit">
-                Send
-              </VBtn>
-              <VBtn
-                variant="tonal"
-                color="secondary"
-                @click="isSendDrawerOpen = false"
-              >
-                Cancel
-              </VBtn>
+              Add item
+            </VBtn>
+          </VCardText>
+
+          <VDivider />
+
+          <VCardText>
+            <VTextarea
+              v-model="form.notes"
+              label="Note to the client (optional)"
+              rows="2"
+              auto-grow
+              :error-messages="formErrors.notes"
+            />
+          </VCardText>
+        </VCard>
+      </VCol>
+
+      <VCol
+        cols="12"
+        lg="3"
+      >
+        <VCard class="mb-6">
+          <VCardText>
+            <VTextField
+              v-model.number="form.discount_percent"
+              type="number"
+              min="0"
+              max="100"
+              label="Discount"
+              suffix="%"
+              class="mb-4"
+              :error-messages="formErrors.discount_percent"
+            />
+            <VTextField
+              v-model.number="form.tax_percent"
+              type="number"
+              min="0"
+              max="100"
+              label="Tax"
+              suffix="%"
+              :error-messages="formErrors.tax_percent"
+            />
+          </VCardText>
+          <VDivider />
+          <VCardText>
+            <div class="d-flex justify-space-between mb-2">
+              <span class="text-medium-emphasis">Subtotal</span><span>{{ formatMoney(totals.subtotal) }}</span>
             </div>
-          </VCol>
-        </VRow>
-      </VForm>
-    </VCardText>
-  </VNavigationDrawer>
+            <div class="d-flex justify-space-between mb-2">
+              <span class="text-medium-emphasis">Discount</span><span>−{{ formatMoney(totals.discount) }}</span>
+            </div>
+            <div class="d-flex justify-space-between mb-2">
+              <span class="text-medium-emphasis">Tax</span><span>{{ formatMoney(totals.tax) }}</span>
+            </div>
+            <VDivider class="my-3" />
+            <div class="d-flex justify-space-between text-h6">
+              <span>Total</span><span>{{ formatMoney(totals.total) }}</span>
+            </div>
+          </VCardText>
+        </VCard>
+
+        <VBtn
+          block
+          type="submit"
+          :loading="isSaving"
+          class="mb-3"
+        >
+          {{ isEdit ? 'Save changes' : 'Create draft' }}
+        </VBtn>
+        <VBtn
+          block
+          variant="tonal"
+          color="secondary"
+          :to="invoiceId ? `/invoices/${invoiceId}/preview` : '/invoices'"
+        >
+          Cancel
+        </VBtn>
+      </VCol>
+    </VRow>
+  </VForm>
 </template>

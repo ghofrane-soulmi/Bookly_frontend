@@ -25,7 +25,11 @@ function stopProgress() {
   isNavigating.value = false
 }
 
-router.beforeEach(to => {
+// Permissions are re-read from the API once per page load, so a role change
+// (or a session saved before permissions were stored) is picked up.
+let permissionsRefreshed = false
+
+router.beforeEach(async to => {
   const authStore = useAuthStore()
 
   if (to.matched.some(record => record.meta.requiresAuth) && !authStore.isLoggedIn)
@@ -33,6 +37,23 @@ router.beforeEach(to => {
 
   if (guestOnlyPaths.includes(to.path) && authStore.isLoggedIn)
     return '/dashboard'
+
+  if (authStore.isLoggedIn && !permissionsRefreshed) {
+    permissionsRefreshed = true
+
+    const refresh = authStore.fetchMe().catch(() => {})
+
+    // Only block the first navigation when nothing is stored yet; otherwise
+    // render straight away and let the refresh land in the background.
+    if (!authStore.permissions.length)
+      await refresh
+  }
+
+  // A page the user's role can't use would only show empty data and 403s:
+  // send them somewhere they can work instead.
+  const needed = to.meta.permission as string | undefined
+  if (authStore.isLoggedIn && needed && !authStore.can(needed))
+    return authStore.can('dashboard.view') && to.path !== '/dashboard' ? '/dashboard' : '/account-settings'
 
   clearTimeout(navTimer)
   navTimer = setTimeout(() => {

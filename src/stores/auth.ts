@@ -52,14 +52,28 @@ export const useAuthStore = defineStore('auth', {
     user: readStorage<AuthUser>('bookly_user'),
     business: readStorage<AuthBusiness>('bookly_business'),
     token: localStorage.getItem('bookly_token') as string | null,
+
+    // Permission names from the API. Only decides what the UI shows; the API
+    // enforces every permission itself.
+    permissions: readStorage<string[]>('bookly_permissions') ?? [],
   }),
 
   getters: {
     isLoggedIn: state => !!state.token,
+
+    /** True if the user holds the permission (or any of them, for an array). */
+    can: state => (permission?: string | string[]) => {
+      if (!permission)
+        return true
+
+      const needed = Array.isArray(permission) ? permission : [permission]
+
+      return needed.some(p => state.permissions.includes(p))
+    },
   },
 
   actions: {
-    setSession(user: AuthUser, token: string, business?: AuthBusiness) {
+    setSession(user: AuthUser, token: string, business?: AuthBusiness, permissions?: string[]) {
       this.user = user
       this.token = token
       localStorage.setItem('bookly_user', JSON.stringify(user))
@@ -69,6 +83,25 @@ export const useAuthStore = defineStore('auth', {
         this.business = business
         localStorage.setItem('bookly_business', JSON.stringify(business))
       }
+
+      if (permissions)
+        this.setPermissions(permissions)
+    },
+
+    setPermissions(permissions: string[]) {
+      this.permissions = permissions
+      localStorage.setItem('bookly_permissions', JSON.stringify(permissions))
+    },
+
+    /** Re-reads user, business and permissions (role changes, older sessions). */
+    async fetchMe() {
+      const { data } = await api.get('/auth/me')
+
+      this.user = data.user
+      this.business = data.business
+      localStorage.setItem('bookly_user', JSON.stringify(data.user))
+      localStorage.setItem('bookly_business', JSON.stringify(data.business))
+      this.setPermissions(data.permissions ?? [])
     },
 
     updateUser(user: Partial<AuthUser>) {
@@ -91,6 +124,8 @@ export const useAuthStore = defineStore('auth', {
       this.user = null
       this.business = null
       this.token = null
+      this.permissions = []
+      localStorage.removeItem('bookly_permissions')
       localStorage.removeItem('bookly_user')
       localStorage.removeItem('bookly_business')
       localStorage.removeItem('bookly_token')
@@ -99,13 +134,13 @@ export const useAuthStore = defineStore('auth', {
     async register(payload: RegisterPayload) {
       const { data } = await api.post('/auth/register', payload)
 
-      this.setSession(data.user, data.token, data.business)
+      this.setSession(data.user, data.token, data.business, data.permissions)
     },
 
     async login(payload: LoginPayload) {
       const { data } = await api.post('/auth/login', payload)
 
-      this.setSession(data.user, data.token, data.business)
+      this.setSession(data.user, data.token, data.business, data.permissions)
     },
 
     async logout() {

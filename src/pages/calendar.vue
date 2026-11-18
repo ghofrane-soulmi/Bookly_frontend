@@ -214,8 +214,13 @@ const setView = (view: string) => {
 const calendarOptions = computed(() => ({
   plugins: [dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin],
   initialView: 'timeGridWeek',
+
   headerToolbar: false as const,
-  height: 'auto',
+
+  // Fixed height so the time grid scrolls inside the card and can open on
+  // working hours instead of midnight; earlier slots stay reachable.
+  contentHeight: 680,
+  scrollTime: '08:00:00',
   nowIndicator: true,
   timeZone: authStore.business?.timezone ?? 'local',
   events: calendarEvents.value,

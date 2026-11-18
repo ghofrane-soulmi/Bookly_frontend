@@ -3,9 +3,11 @@ import { watchDebounced } from '@vueuse/core'
 import ListPaginationFooter from '@/components/ListPaginationFooter.vue'
 import { servicesApis } from '@/core/apis/services.apis'
 import type { Service } from '@/core/apis/types/services.types'
+import { useAuthStore } from '@/stores/auth'
 import { formatMoney } from '@/utils/money'
 
 const router = useRouter()
+const authStore = useAuthStore()
 
 const services = ref<Service[]>([])
 const isLoading = ref(false)
@@ -20,6 +22,7 @@ const categoryFilter = ref<string | null>(null)
 const categories = ref<string[]>([])
 
 const perPageOptions = [10, 25, 50, 100]
+
 const statusOptions = [
   { title: 'Active', value: 'active' },
   { title: 'Inactive', value: 'inactive' },
@@ -74,6 +77,7 @@ watchDebounced(search, () => {
 
 const exportCsv = () => {
   const header = ['Name', 'Description', 'Category', 'Duration (min)', 'Price', 'Status']
+
   const rows = services.value.map(s => [
     s.name,
     s.description ?? '',
@@ -177,6 +181,7 @@ const deleteService = async () => {
         </VBtn>
 
         <VBtn
+          v-if="authStore.can('services.manage')"
           prepend-icon="bx-plus"
           @click="router.push('/services/add')"
         >
@@ -226,22 +231,24 @@ const deleteService = async () => {
       </template>
 
       <template #item.actions="{ item }">
-        <VBtn
-          icon
-          variant="text"
-          size="small"
-          @click="router.push(`/services/${item.id}/edit`)"
-        >
-          <VIcon icon="bx-edit" />
-        </VBtn>
-        <VBtn
-          icon
-          variant="text"
-          size="small"
-          @click="confirmDelete(item)"
-        >
-          <VIcon icon="bx-trash" />
-        </VBtn>
+        <template v-if="authStore.can('services.manage')">
+          <VBtn
+            icon
+            variant="text"
+            size="small"
+            @click="router.push(`/services/${item.id}/edit`)"
+          >
+            <VIcon icon="bx-edit" />
+          </VBtn>
+          <VBtn
+            icon
+            variant="text"
+            size="small"
+            @click="confirmDelete(item)"
+          >
+            <VIcon icon="bx-trash" />
+          </VBtn>
+        </template>
       </template>
 
       <template #bottom>

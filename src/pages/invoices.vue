@@ -1,376 +1,351 @@
 <script setup lang="ts">
 import { watchDebounced } from '@vueuse/core'
 import ListPaginationFooter from '@/components/ListPaginationFooter.vue'
-import { useAuthStore } from '@/stores/auth'
-import { invoiceStatusMeta, invoiceStatusOptions, invoiceTotals, useInvoicesStore, type Invoice, type InvoiceStatus } from '@/stores/invoices'
+import { invoicesApis } from '@/core/apis/invoices.apis'
+import type { Invoice, InvoiceState, InvoiceSummary, UninvoicedAppointment } from '@/core/apis/types/invoices.types'
+import { invoiceStateMeta } from '@/core/apis/types/invoices.types'
 import { formatMoney } from '@/utils/money'
 
 const router = useRouter()
-const authStore = useAuthStore()
-const invoicesStore = useInvoicesStore()
-const currency = computed(() => authStore.business?.currency_code ?? 'USD')
 
-const avatarColors = ['primary', 'success', 'warning', 'error', 'secondary', 'info']
-const avatarColor = (name: string) => avatarColors[[...name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % avatarColors.length]
-const initials = (name: string) => name.split(' ').map(part => part[0]).slice(0, 2).join('').toUpperCase()
+const openRow = (_event: Event, row: { item: Invoice }) => router.push(`/invoices/${row.item.id}/preview`)
+
+const invoices = ref<Invoice[]>([])
+const summary = ref<InvoiceSummary | null>(null)
+const total = ref(0)
+const isLoading = ref(true)
+const errorMessage = ref('')
 
 const page = ref(1)
 const perPage = ref(10)
 const search = ref('')
-const statusFilter = ref<InvoiceStatus | null>(null)
-const selected = ref<number[]>([])
-
+const stateFilter = ref<InvoiceState | null>(null)
 const perPageOptions = [10, 25, 50, 100]
 
-const invoiceRows = computed(() => invoicesStore.invoices.map(invoice => ({
-  invoice,
-  ...invoiceTotals(invoice, currency.value),
-})))
+const stateOptions = (Object.keys(invoiceStateMeta) as InvoiceState[])
+  .map(value => ({ title: invoiceStateMeta[value].label, value }))
 
-const filteredInvoices = computed(() => invoiceRows.value.filter(({ invoice }) => {
-  const matchesSearch = !search.value
-    || invoice.client.name.toLowerCase().includes(search.value.toLowerCase())
-    || invoice.client.email.toLowerCase().includes(search.value.toLowerCase())
-    || invoice.number.includes(search.value)
+const fetchInvoices = async () => {
+  isLoading.value = true
+  errorMessage.value = ''
 
-  const matchesStatus = !statusFilter.value || invoice.status === statusFilter.value
+  try {
+    const res = await invoicesApis.handleListInvoices({
+      page: page.value,
+      per_page: perPage.value,
+      search: search.value || undefined,
+      state: stateFilter.value ?? undefined,
+    })
 
-  return matchesSearch && matchesStatus
-}))
-
-const total = computed(() => filteredInvoices.value.length)
-
-const paginatedInvoices = computed(() => {
-  const start = (page.value - 1) * perPage.value
-
-  return filteredInvoices.value.slice(start, start + perPage.value)
-})
-
-watch([perPage, statusFilter], () => { page.value = 1 })
-watchDebounced(search, () => { page.value = 1 }, { debounce: 400 })
-
-const stats = computed(() => {
-  const distinctClients = new Set(invoicesStore.invoices.map(i => i.client.email)).size
-  const paidTotal = invoiceRows.value.filter(r => r.invoice.status === 'paid').reduce((sum, r) => sum + r.total.amount, 0)
-  const unpaidTotal = invoiceRows.value.filter(r => r.invoice.status !== 'paid').reduce((sum, r) => sum + r.balance.amount, 0)
-
-  return {
-    clients: distinctClients,
-    invoices: invoicesStore.invoices.length,
-    paid: { amount: paidTotal, currency: currency.value },
-    unpaid: { amount: unpaidTotal, currency: currency.value },
+    invoices.value = res.data
+    total.value = res.meta?.total ?? 0
+    summary.value = res.meta?.summary ?? null
   }
-})
+  catch {
+    errorMessage.value = 'Invoices could not be loaded. Please try again.'
+  }
+  finally {
+    isLoading.value = false
+  }
+}
 
-const formatDate = (isoDate: string) => new Date(`${isoDate}T00:00:00`).toLocaleDateString('en-US', { dateStyle: 'medium' })
+watch([page, perPage, stateFilter], fetchInvoices, { immediate: true })
+watch([perPage, stateFilter], () => {
+  page.value = 1
+})
+watchDebounced(search, () => {
+  page.value = 1
+  fetchInvoices()
+}, { debounce: 400 })
+
+const formatDate = (isoDate: string) => new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
 const headers = [
-  { title: '#', key: 'number' },
-  { title: 'Status', key: 'status', sortable: false },
-  { title: 'Client', key: 'client' },
-  { title: 'Total', key: 'total' },
-  { title: 'Issued Date', key: 'issuedDate' },
+  { title: '#', key: 'number', sortable: false },
+  { title: 'Client', key: 'client', sortable: false },
+  { title: 'Issued', key: 'issued_on', sortable: false },
+  { title: 'Due', key: 'due_on', sortable: false },
+  { title: 'Total', key: 'total', sortable: false },
   { title: 'Balance', key: 'balance', sortable: false },
-  { title: 'Actions', key: 'actions', sortable: false, align: 'end' as const },
+  { title: 'Status', key: 'state', sortable: false },
+  { title: '', key: 'actions', sortable: false, align: 'end' as const },
 ]
 
-const isDeleteDialogOpen = ref(false)
-const deletingId = ref<number | null>(null)
+const cards = computed(() => {
+  const s = summary.value
+  if (!s)
+    return []
 
-const confirmDelete = (invoice: Invoice) => {
-  deletingId.value = invoice.id
-  isDeleteDialogOpen.value = true
+  return [
+    { title: 'Invoiced', value: formatMoney(s.invoiced), icon: 'bx-receipt', color: 'primary' },
+    { title: 'Paid', value: formatMoney(s.paid), icon: 'bx-check-circle', color: 'success' },
+    { title: 'Outstanding', value: formatMoney(s.outstanding), icon: 'bx-time-five', color: 'warning' },
+    { title: 'Past due', value: String(s.counts.past_due), icon: 'bx-error-circle', color: 'error' },
+  ]
+})
+
+// --- Row actions -----------------------------------------------------------
+const snackbar = ref({ show: false, text: '', color: 'success' })
+
+const notify = (text: string, color = 'success') => {
+  snackbar.value = { show: true, text, color }
 }
 
-const deleteInvoice = () => {
-  if (deletingId.value)
-    invoicesStore.remove(deletingId.value)
+const duplicate = async (invoice: Invoice) => {
+  const res = await invoicesApis.handleDuplicateInvoice(invoice.id)
 
-  isDeleteDialogOpen.value = false
+  if (res.status.code === 201)
+    router.push(`/invoices/${res.data.id}/edit`)
+  else
+    notify(res.status.message, 'error')
 }
 
-const openPreview = (invoice: Invoice) => router.push(`/invoices/${invoice.id}/preview`)
+const deleting = ref<Invoice | null>(null)
+
+const deleteInvoice = async () => {
+  if (!deleting.value)
+    return
+
+  const res = await invoicesApis.handleDeleteInvoice(deleting.value.id)
+
+  deleting.value = null
+  notify(res.status.message, res.status.code === 200 ? 'success' : 'error')
+  fetchInvoices()
+}
+
+// --- Invoice completed appointments ----------------------------------------
+const isAppointmentsDialogOpen = ref(false)
+const uninvoiced = ref<UninvoicedAppointment[]>([])
+const selectedAppointmentIds = ref<number[]>([])
+const isLoadingUninvoiced = ref(false)
+const isCreatingFromAppointments = ref(false)
+
+const openAppointmentsDialog = async () => {
+  isAppointmentsDialogOpen.value = true
+  isLoadingUninvoiced.value = true
+  selectedAppointmentIds.value = []
+
+  try {
+    uninvoiced.value = (await invoicesApis.handleUninvoicedAppointments()).data
+  }
+  finally {
+    isLoadingUninvoiced.value = false
+  }
+}
+
+const selectedClientId = computed(() => uninvoiced.value.find(a => selectedAppointmentIds.value.includes(a.id))?.client_id ?? null)
+
+const toggleAppointment = (appointment: UninvoicedAppointment) => {
+  const ids = selectedAppointmentIds.value
+
+  selectedAppointmentIds.value = ids.includes(appointment.id)
+    ? ids.filter(id => id !== appointment.id)
+    : [...ids, appointment.id]
+}
+
+const createFromAppointments = async () => {
+  isCreatingFromAppointments.value = true
+
+  try {
+    const res = await invoicesApis.handleCreateFromAppointments(selectedAppointmentIds.value)
+
+    if (res.status.code === 201) {
+      isAppointmentsDialogOpen.value = false
+      router.push(`/invoices/${res.data.id}/preview`)
+    }
+    else {
+      notify(Object.values(res.errors ?? {})[0]?.[0] ?? res.status.message, 'error')
+    }
+  }
+  finally {
+    isCreatingFromAppointments.value = false
+  }
+}
+
+const formatDateTime = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 </script>
 
 <template>
-  <VCard class="mb-6">
-    <VCardText class="px-3">
-      <VRow>
-        <VCol
-          cols="12"
-          sm="6"
-          md="3"
-          class="px-6"
-        >
-          <div class="d-flex justify-space-between align-center border-b pb-4">
-            <div class="d-flex flex-column">
-              <h4 class="text-h4">
-                {{ stats.clients }}
-              </h4>
-              <span class="text-body-1 text-capitalize">Clients</span>
+  <VRow class="mb-2">
+    <VCol
+      v-for="card in cards"
+      :key="card.title"
+      cols="12"
+      sm="6"
+      md="3"
+    >
+      <VCard>
+        <VCardText class="d-flex align-center justify-space-between">
+          <div>
+            <div class="text-body-2 text-medium-emphasis">
+              {{ card.title }}
             </div>
-            <VAvatar
-              variant="tonal"
-              rounded
-              size="42"
-            >
-              <VIcon
-                icon="bx-user"
-                size="26"
-              />
-            </VAvatar>
-          </div>
-        </VCol>
-
-        <VDivider
-          vertical
-          inset
-          class="d-none d-sm-block"
-        />
-
-        <VCol
-          cols="12"
-          sm="6"
-          md="3"
-          class="px-6"
-        >
-          <div class="d-flex justify-space-between align-center border-b pb-4">
-            <div class="d-flex flex-column">
-              <h4 class="text-h4">
-                {{ stats.invoices }}
-              </h4>
-              <span class="text-body-1 text-capitalize">Invoices</span>
+            <div class="text-h5 mt-1">
+              {{ card.value }}
             </div>
-            <VAvatar
-              variant="tonal"
-              rounded
-              size="42"
-            >
-              <VIcon
-                icon="bx-file"
-                size="26"
-              />
-            </VAvatar>
           </div>
-        </VCol>
+          <VAvatar
+            :color="card.color"
+            variant="tonal"
+            rounded
+            size="42"
+          >
+            <VIcon
+              :icon="card.icon"
+              size="26"
+            />
+          </VAvatar>
+        </VCardText>
+      </VCard>
+    </VCol>
+  </VRow>
 
-        <VCol
-          cols="12"
-          sm="6"
-          md="3"
-          class="px-6"
-        >
-          <div class="d-flex justify-space-between align-center">
-            <div class="d-flex flex-column">
-              <h4 class="text-h4">
-                {{ formatMoney(stats.paid) }}
-              </h4>
-              <span class="text-body-1 text-capitalize">Paid</span>
-            </div>
-            <VAvatar
-              variant="tonal"
-              rounded
-              size="42"
-            >
-              <VIcon
-                icon="bx-check-double"
-                size="26"
-              />
-            </VAvatar>
-          </div>
-        </VCol>
-
-        <VDivider
-          vertical
-          inset
-          class="d-none d-sm-block"
-        />
-
-        <VCol
-          cols="12"
-          sm="6"
-          md="3"
-          class="px-6"
-        >
-          <div class="d-flex justify-space-between align-center">
-            <div class="d-flex flex-column">
-              <h4 class="text-h4">
-                {{ formatMoney(stats.unpaid) }}
-              </h4>
-              <span class="text-body-1 text-capitalize">Unpaid</span>
-            </div>
-            <VAvatar
-              variant="tonal"
-              rounded
-              size="42"
-            >
-              <VIcon
-                icon="bx-error-circle"
-                size="26"
-              />
-            </VAvatar>
-          </div>
-        </VCol>
-      </VRow>
-    </VCardText>
-  </VCard>
-
-  <VCard id="invoice-list">
-    <VCardText class="d-flex justify-space-between align-center flex-wrap gap-4">
-      <div class="d-flex gap-4 align-center flex-wrap">
-        <div class="d-flex align-center gap-2">
-          <span>Show</span>
-          <VSelect
-            v-model="perPage"
-            :items="perPageOptions"
-            style="inline-size: 5.5rem;"
-          />
-        </div>
-      </div>
-
-      <VBtn
-        prepend-icon="bx-plus"
-        @click="router.push('/invoices/add')"
-      >
-        Create invoice
-      </VBtn>
-    </VCardText>
-
-    <VCardText class="d-flex align-center flex-wrap gap-4">
-      <VTextField
-        v-model="search"
-        placeholder="Search Invoice"
-        style="inline-size: 12.5rem;"
+  <VCard title="Invoices">
+    <VCardText class="d-flex flex-wrap gap-4">
+      <VSelect
+        v-model="perPage"
+        :items="perPageOptions"
+        style="inline-size: 6.25rem;"
       />
       <VSelect
-        v-model="statusFilter"
-        placeholder="Invoice Status"
-        :items="invoiceStatusOptions"
+        v-model="stateFilter"
+        :items="stateOptions"
+        placeholder="All statuses"
         clearable
-        style="inline-size: 10.2rem;"
+        style="inline-size: 12rem;"
       />
+
+      <VSpacer />
+
+      <div class="d-flex align-center flex-wrap gap-4">
+        <VTextField
+          v-model="search"
+          placeholder="Search # or client"
+          style="inline-size: 14rem;"
+        />
+        <VBtn
+          variant="tonal"
+          prepend-icon="bx-calendar-check"
+          @click="openAppointmentsDialog"
+        >
+          Invoice appointments
+        </VBtn>
+        <VBtn
+          prepend-icon="bx-plus"
+          to="/invoices/add"
+        >
+          New invoice
+        </VBtn>
+      </div>
     </VCardText>
 
     <VDivider />
 
+    <VAlert
+      v-if="errorMessage"
+      type="error"
+      variant="tonal"
+      class="ma-4"
+      :text="errorMessage"
+    />
+
     <VDataTable
-      v-model="selected"
       :headers="headers"
-      :items="paginatedInvoices"
+      :items="invoices"
+      :loading="isLoading"
       :items-per-page="perPage"
-      show-select
       hide-default-footer
-      no-data-text="No invoices yet."
-      class="text-no-wrap"
+      no-data-text="No invoices yet. Create one, or invoice your completed appointments."
+      hover
+      @click:row="openRow"
     >
       <template #item.number="{ item }">
-        <a
-          href="#"
-          class="text-link"
-          @click.prevent="openPreview(item.invoice)"
-        >#{{ item.invoice.number }}</a>
-      </template>
-
-      <template #item.status="{ item }">
-        <VTooltip :text="invoiceStatusMeta[item.invoice.status].label">
-          <template #activator="{ props }">
-            <VAvatar
-              v-bind="props"
-              :color="invoiceStatusMeta[item.invoice.status].color"
-              variant="tonal"
-              size="28"
-            >
-              <VIcon
-                :icon="invoiceStatusMeta[item.invoice.status].icon"
-                size="16"
-              />
-            </VAvatar>
-          </template>
-        </VTooltip>
+        <RouterLink
+          :to="`/invoices/${item.id}/preview`"
+          class="font-weight-medium"
+          @click.stop
+        >
+          #{{ item.number }}
+        </RouterLink>
       </template>
 
       <template #item.client="{ item }">
-        <div class="d-flex align-center">
-          <VAvatar
-            :color="avatarColor(item.invoice.client.name)"
-            variant="tonal"
-            size="34"
-            class="me-3"
-          >
-            <span>{{ initials(item.invoice.client.name) }}</span>
-          </VAvatar>
-          <div class="d-flex flex-column">
-            <span class="font-weight-medium">{{ item.invoice.client.name }}</span>
-            <span class="text-sm text-medium-emphasis">{{ item.invoice.client.email }}</span>
-          </div>
+        <div class="d-flex flex-column">
+          <span class="text-high-emphasis">{{ item.client.name }}</span>
+          <small
+            v-if="item.client.email"
+            class="text-medium-emphasis"
+          >{{ item.client.email }}</small>
         </div>
       </template>
 
-      <template #item.total="{ item }">
-        {{ formatMoney(item.total) }}
+      <template #item.issued_on="{ item }">
+        {{ formatDate(item.issued_on) }}
       </template>
 
-      <template #item.issuedDate="{ item }">
-        {{ formatDate(item.invoice.issuedDate) }}
+      <template #item.due_on="{ item }">
+        {{ formatDate(item.due_on) }}
+      </template>
+
+      <template #item.total="{ item }">
+        {{ formatMoney(item.money.total) }}
       </template>
 
       <template #item.balance="{ item }">
+        <span :class="item.money.balance.amount ? 'text-high-emphasis' : 'text-success'">
+          {{ item.money.balance.amount ? formatMoney(item.money.balance) : 'Settled' }}
+        </span>
+      </template>
+
+      <template #item.state="{ item }">
         <VChip
-          v-if="item.invoice.status === 'paid'"
-          color="success"
+          :color="invoiceStateMeta[item.state].color"
+          :prepend-icon="invoiceStateMeta[item.state].icon"
           size="small"
           label
         >
-          Paid
+          {{ invoiceStateMeta[item.state].label }}
         </VChip>
-        <span
-          v-else
-          class="text-base text-high-emphasis"
-        >{{ formatMoney(item.balance) }}</span>
       </template>
 
       <template #item.actions="{ item }">
-        <VBtn
-          icon
-          variant="text"
-          size="small"
-          @click="confirmDelete(item.invoice)"
+        <div
+          class="d-flex justify-end"
+          @click.stop
         >
-          <VIcon icon="bx-trash" />
-        </VBtn>
-        <VBtn
-          icon
-          variant="text"
-          size="small"
-          @click="openPreview(item.invoice)"
-        >
-          <VIcon icon="bx-show" />
-        </VBtn>
-        <VMenu>
-          <template #activator="{ props }">
-            <VBtn
-              v-bind="props"
-              icon
-              variant="text"
-              size="small"
-              color="medium-emphasis"
-            >
-              <VIcon icon="bx-dots-vertical-rounded" />
-            </VBtn>
-          </template>
-          <VList>
-            <VListItem
-              prepend-icon="bx-edit"
-              title="Edit"
-              @click="router.push(`/invoices/${item.invoice.id}/edit`)"
-            />
-            <VListItem
-              prepend-icon="bx-copy"
-              title="Duplicate"
-              @click="invoicesStore.duplicate(item.invoice.id)"
-            />
-          </VList>
-        </VMenu>
+          <VBtn
+            icon
+            variant="text"
+            size="small"
+            :to="`/invoices/${item.id}/edit`"
+            aria-label="Edit"
+          >
+            <VIcon icon="bx-edit" />
+          </VBtn>
+          <VBtn
+            icon
+            variant="text"
+            size="small"
+            aria-label="More"
+          >
+            <VIcon icon="bx-dots-vertical-rounded" />
+            <VMenu activator="parent">
+              <VList density="compact">
+                <VListItem
+                  prepend-icon="bx-copy"
+                  title="Duplicate"
+                  @click="duplicate(item)"
+                />
+                <VListItem
+                  prepend-icon="bx-trash"
+                  title="Delete"
+                  :disabled="item.money.paid.amount > 0"
+                  @click="deleting = item"
+                />
+              </VList>
+            </VMenu>
+          </VBtn>
+        </div>
       </template>
 
       <template #bottom>
@@ -384,30 +359,108 @@ const openPreview = (invoice: Invoice) => router.push(`/invoices/${invoice.id}/p
     </VDataTable>
   </VCard>
 
-  <!-- Delete confirmation -->
+  <!-- Invoice completed appointments -->
   <VDialog
-    v-model="isDeleteDialogOpen"
-    max-width="400"
+    v-model="isAppointmentsDialogOpen"
+    max-width="640"
+    scrollable
   >
-    <VCard title="Delete invoice?">
-      <VCardText>
-        This can't be undone.
+    <VCard title="Invoice completed appointments">
+      <VCardSubtitle class="pb-2">
+        Completed appointments that aren't on an invoice yet. Pick one or more for the same client.
+      </VCardSubtitle>
+      <VDivider />
+      <VCardText style="max-block-size: 60vh;">
+        <PageLoader
+          v-if="isLoadingUninvoiced"
+          text="Loading appointments…"
+          style="min-block-size: 200px;"
+        />
+        <p
+          v-else-if="!uninvoiced.length"
+          class="text-medium-emphasis text-center py-6 mb-0"
+        >
+          Nothing to invoice: every completed appointment is already on an invoice.
+        </p>
+        <VList
+          v-else
+          density="compact"
+        >
+          <VListItem
+            v-for="appointment in uninvoiced"
+            :key="appointment.id"
+            :disabled="selectedClientId !== null && appointment.client_id !== selectedClientId"
+            @click="toggleAppointment(appointment)"
+          >
+            <template #prepend>
+              <VCheckboxBtn
+                :model-value="selectedAppointmentIds.includes(appointment.id)"
+                class="me-2"
+              />
+            </template>
+            <VListItemTitle>{{ appointment.client.name }} — {{ appointment.service.name }}</VListItemTitle>
+            <VListItemSubtitle>{{ formatDateTime(appointment.starts_at) }} · {{ appointment.staff.name }}</VListItemSubtitle>
+            <template #append>
+              <span class="text-body-2">{{ formatMoney(appointment.price) }}</span>
+            </template>
+          </VListItem>
+        </VList>
       </VCardText>
-      <VCardText class="d-flex justify-end gap-3">
+      <VDivider />
+      <VCardActions class="pa-4">
+        <VSpacer />
         <VBtn
           variant="tonal"
           color="secondary"
-          @click="isDeleteDialogOpen = false"
+          @click="isAppointmentsDialogOpen = false"
+        >
+          Cancel
+        </VBtn>
+        <VBtn
+          variant="flat"
+          :disabled="!selectedAppointmentIds.length"
+          :loading="isCreatingFromAppointments"
+          @click="createFromAppointments"
+        >
+          Create draft invoice
+        </VBtn>
+      </VCardActions>
+    </VCard>
+  </VDialog>
+
+  <!-- Delete confirmation -->
+  <VDialog
+    :model-value="!!deleting"
+    max-width="400"
+    @update:model-value="v => !v && (deleting = null)"
+  >
+    <VCard :title="`Delete invoice #${deleting?.number}?`">
+      <VCardText>This can't be undone. Any appointments on it can be invoiced again.</VCardText>
+      <VCardActions class="pa-4">
+        <VSpacer />
+        <VBtn
+          variant="tonal"
+          color="secondary"
+          @click="deleting = null"
         >
           Cancel
         </VBtn>
         <VBtn
           color="error"
+          variant="flat"
           @click="deleteInvoice"
         >
           Delete
         </VBtn>
-      </VCardText>
+      </VCardActions>
     </VCard>
   </VDialog>
+
+  <VSnackbar
+    v-model="snackbar.show"
+    :color="snackbar.color"
+    location="top end"
+  >
+    {{ snackbar.text }}
+  </VSnackbar>
 </template>

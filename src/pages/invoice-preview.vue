@@ -1,84 +1,167 @@
 <script setup lang="ts">
+import { invoicesApis } from '@/core/apis/invoices.apis'
+import type { Invoice, PaymentMethod } from '@/core/apis/types/invoices.types'
+import { invoiceStateMeta, paymentMethodLabels } from '@/core/apis/types/invoices.types'
 import { useAuthStore } from '@/stores/auth'
-import { invoiceTotals, useInvoicesStore } from '@/stores/invoices'
-import { formatMoney } from '@/utils/money'
+import { currencyDecimals, formatMoney } from '@/utils/money'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const invoicesStore = useInvoicesStore()
 
 const invoiceId = computed(() => Number(route.params.id))
-const invoice = computed(() => invoicesStore.getById(invoiceId.value))
+const invoice = ref<Invoice | null>(null)
+const isLoading = ref(true)
+const errorMessage = ref('')
 
-const currency = computed(() => authStore.business?.currency_code ?? 'USD')
-const totals = computed(() => invoice.value ? invoiceTotals(invoice.value, currency.value) : null)
+const snackbar = ref({ show: false, text: '', color: 'success' })
 
-const businessBank = {
-  bankName: 'Bookly Business Bank',
-  country: 'United States',
-  iban: 'BK00 0000 0000',
-  swift: 'BOOKLYXX',
+const notify = (text: string, color = 'success') => {
+  snackbar.value = { show: true, text, color }
 }
 
-const formatDate = (isoDate: string) => new Date(`${isoDate}T00:00:00`).toLocaleDateString('en-US', { dateStyle: 'medium' })
-const itemPrice = (cost: number, hours: number) => formatMoney({ amount: Math.round(cost * hours * 100), currency: currency.value })
+const load = async () => {
+  isLoading.value = true
+  errorMessage.value = ''
 
-const isSendDrawerOpen = ref(false)
-const sendForm = reactive({ from: '', to: '', subject: '', message: '' })
+  try {
+    const res = await invoicesApis.handleGetInvoice(invoiceId.value)
 
-const openSendDrawer = () => {
-  if (!invoice.value || !totals.value)
+    if (res.status.code === 200)
+      invoice.value = res.data
+    else
+      errorMessage.value = res.status.message
+  }
+  catch {
+    errorMessage.value = 'This invoice could not be loaded. Please try again.'
+  }
+  finally {
+    isLoading.value = false
+  }
+}
+
+watch(invoiceId, load, { immediate: true })
+
+const formatDate = (isoDate: string) => new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, { dateStyle: 'long' })
+const money = (amount: number) => formatMoney({ amount, currency: invoice.value?.currency_code ?? 'USD' })
+const quantity = (q: number) => Number.isInteger(q) ? String(q) : q.toFixed(2)
+
+// --- Actions -----------------------------------------------------------------
+const busy = ref<string | null>(null)
+
+const run = async (name: string, action: () => Promise<{ data: Invoice; status: { message: string; code: number } }>) => {
+  busy.value = name
+
+  try {
+    const res = await action()
+
+    if ([200, 201].includes(res.status.code)) {
+      invoice.value = res.data
+      notify(res.status.message)
+    }
+    else {
+      notify(res.status.message, 'error')
+    }
+
+    return res
+  }
+  catch {
+    notify('Something went wrong. Please try again.', 'error')
+  }
+  finally {
+    busy.value = null
+  }
+}
+
+const send = () => run('send', () => invoicesApis.handleSendInvoice(invoiceId.value))
+
+const duplicate = async () => {
+  const res = await invoicesApis.handleDuplicateInvoice(invoiceId.value)
+
+  if (res.status.code === 201)
+    router.push(`/invoices/${res.data.id}/edit`)
+}
+
+const isDeleteOpen = ref(false)
+
+const remove = async () => {
+  const res = await invoicesApis.handleDeleteInvoice(invoiceId.value)
+
+  isDeleteOpen.value = false
+
+  if (res.status.code === 200)
+    router.push('/invoices')
+  else
+    notify(res.status.message, 'error')
+}
+
+// --- Payments ------------------------------------------------------------------
+const isPaymentOpen = ref(false)
+const paymentErrors = ref<Record<string, string[]>>({})
+const payment = ref({ amount: '' as number | string, method: 'cash' as PaymentMethod, paid_on: '', note: '' })
+const methodOptions = (Object.keys(paymentMethodLabels) as PaymentMethod[]).map(value => ({ title: paymentMethodLabels[value], value }))
+const priceStep = computed(() => 10 ** -currencyDecimals(invoice.value?.currency_code ?? 'USD'))
+
+const openPayment = () => {
+  if (!invoice.value)
     return
 
-  sendForm.from = authStore.business?.email ?? ''
-  sendForm.to = invoice.value.client.email
-  sendForm.subject = `Invoice #${invoice.value.number} from ${authStore.business?.name ?? 'Bookly'}`
-  sendForm.message = `Dear ${invoice.value.client.name || 'Customer'},\n\n${invoice.value.thanksNote}\n\nWe have generated a new invoice in the amount of ${formatMoney(totals.value.total)}.\n\nWe would appreciate payment of this invoice by ${formatDate(invoice.value.dueDate)}.`
-  isSendDrawerOpen.value = true
+  paymentErrors.value = {}
+  payment.value = {
+    amount: invoice.value.money.balance.amount / 10 ** currencyDecimals(invoice.value.currency_code),
+    method: 'cash',
+    paid_on: new Date().toLocaleDateString('en-CA'),
+    note: '',
+  }
+  isPaymentOpen.value = true
 }
 
-const sendInvoice = () => {
-  invoicesStore.markSent(invoiceId.value)
-  isSendDrawerOpen.value = false
+const savePayment = async () => {
+  busy.value = 'payment'
+  paymentErrors.value = {}
+
+  try {
+    const res = await invoicesApis.handleAddPayment(invoiceId.value, { ...payment.value, note: payment.value.note || null })
+
+    if (res.status.code === 201) {
+      invoice.value = res.data
+      isPaymentOpen.value = false
+      notify('Payment recorded')
+    }
+    else {
+      paymentErrors.value = res.errors ?? {}
+    }
+  }
+  finally {
+    busy.value = null
+  }
 }
 
-const isPaymentDrawerOpen = ref(false)
-const paymentForm = reactive({
-  amount: 0,
-  date: new Date().toISOString().slice(0, 10),
-  method: 'Bank Account',
-  note: '',
-})
+const removePayment = (paymentId: number) => run('payment', () => invoicesApis.handleDeletePayment(invoiceId.value, paymentId))
 
-const openPaymentDrawer = () => {
-  paymentForm.amount = 0
-  paymentForm.date = new Date().toISOString().slice(0, 10)
-  paymentForm.method = 'Bank Account'
-  paymentForm.note = ''
-  isPaymentDrawerOpen.value = true
-}
-
-const recordPayment = () => {
-  if (paymentForm.amount > 0)
-    invoicesStore.addPayment(invoiceId.value, currency.value, Math.round(paymentForm.amount * 100))
-
-  isPaymentDrawerOpen.value = false
-}
-
-const printInvoice = () => window.print()
+const print = () => window.print()
 </script>
 
 <template>
+  <PageLoader
+    v-if="isLoading"
+    text="Loading invoice…"
+  />
+
   <VAlert
-    v-if="!invoice || !totals"
-    type="warning"
+    v-else-if="errorMessage || !invoice"
+    type="error"
     variant="tonal"
+    :text="errorMessage || 'Invoice not found'"
   >
-    Invoice not found.
-    <RouterLink to="/invoices">
-      Back to invoices
-    </RouterLink>
+    <template #append>
+      <VBtn
+        variant="text"
+        to="/invoices"
+      >
+        Back to invoices
+      </VBtn>
+    </template>
   </VAlert>
 
   <VRow v-else>
@@ -86,125 +169,82 @@ const printInvoice = () => window.print()
       cols="12"
       md="9"
     >
-      <VCard class="pa-6 pa-sm-12">
-        <div class="d-flex flex-wrap justify-space-between flex-column flex-sm-row bg-surface rounded gap-6 pa-6 mb-6">
+      <VCard class="invoice-document">
+        <VCardText class="d-flex flex-wrap justify-space-between gap-6 pa-8">
           <div>
-            <h6 class="text-h6 mb-4">
-              {{ authStore.business?.name ?? 'Bookly' }}
-            </h6>
-            <h6
+            <h4 class="text-h4 mb-2">
+              {{ authStore.business?.name }}
+            </h4>
+            <div
               v-if="authStore.business?.email"
-              class="text-h6 font-weight-regular"
+              class="text-body-2"
             >
               {{ authStore.business.email }}
-            </h6>
-            <h6
+            </div>
+            <div
               v-if="authStore.business?.phone"
-              class="text-h6 font-weight-regular"
+              class="text-body-2"
             >
               {{ authStore.business.phone }}
-            </h6>
+            </div>
           </div>
-
-          <div>
-            <h5 class="text-h5 mb-6">
+          <div class="text-sm-end">
+            <h5 class="text-h5 mb-2">
               Invoice #{{ invoice.number }}
             </h5>
-            <h6 class="text-h6 mb-1">
-              <span class="font-weight-regular">Date Issued: </span>
-              <span>{{ formatDate(invoice.issuedDate) }}</span>
-            </h6>
-            <h6 class="text-h6">
-              <span class="font-weight-regular">Due Date: </span>
-              <span>{{ formatDate(invoice.dueDate) }}</span>
-            </h6>
+            <div class="text-body-2">
+              Issued: {{ formatDate(invoice.issued_on) }}
+            </div>
+            <div class="text-body-2">
+              Due: {{ formatDate(invoice.due_on) }}
+            </div>
+            <VChip
+              :color="invoiceStateMeta[invoice.state].color"
+              :prepend-icon="invoiceStateMeta[invoice.state].icon"
+              size="small"
+              label
+              class="mt-2 no-print"
+            >
+              {{ invoiceStateMeta[invoice.state].label }}
+            </VChip>
           </div>
-        </div>
+        </VCardText>
 
-        <VRow class="mb-6">
-          <VCol
-            cols="12"
-            md="6"
-            class="text-no-wrap"
+        <VDivider />
+
+        <VCardText class="pa-8">
+          <div class="text-overline text-medium-emphasis">
+            Bill to
+          </div>
+          <div class="text-body-1 font-weight-medium">
+            {{ invoice.client.name }}
+          </div>
+          <div
+            v-if="invoice.client.email"
+            class="text-body-2"
           >
-            <h6 class="text-h6 mb-4">
-              Invoice To:
-            </h6>
-            <p class="mb-0 text-body-1">
-              {{ invoice.client.name }}
-            </p>
-            <p
-              v-if="invoice.client.phone"
-              class="mb-0 text-body-1"
-            >
-              {{ invoice.client.phone }}
-            </p>
-            <p
-              v-if="invoice.client.email"
-              class="mb-0 text-body-1"
-            >
-              {{ invoice.client.email }}
-            </p>
-          </VCol>
-
-          <VCol
-            cols="12"
-            md="6"
-            class="text-no-wrap"
+            {{ invoice.client.email }}
+          </div>
+          <div
+            v-if="invoice.client.phone"
+            class="text-body-2"
           >
-            <h6 class="text-h6 mb-4">
-              Bill To:
-            </h6>
-            <table>
-              <tbody class="text-body-1">
-                <tr>
-                  <td class="pe-4">
-                    Total Due:
-                  </td>
-                  <td>{{ formatMoney(totals.total) }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    Bank Name:
-                  </td>
-                  <td>{{ businessBank.bankName }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    Country:
-                  </td>
-                  <td>{{ businessBank.country }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    IBAN:
-                  </td>
-                  <td>{{ businessBank.iban }}</td>
-                </tr>
-                <tr>
-                  <td class="pe-4">
-                    SWIFT Code:
-                  </td>
-                  <td>{{ businessBank.swift }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </VCol>
-        </VRow>
+            {{ invoice.client.phone }}
+          </div>
+        </VCardText>
 
-        <VTable class="border mb-6">
+        <VTable class="border-t">
           <thead>
             <tr>
-              <th>ITEM</th>
-              <th>DESCRIPTION</th>
-              <th class="text-center">
-                HOURS
+              <th>Item</th>
+              <th class="text-end">
+                Qty
               </th>
-              <th class="text-center">
-                QTY
+              <th class="text-end">
+                Unit price
               </th>
-              <th class="text-center">
-                TOTAL
+              <th class="text-end">
+                Amount
               </th>
             </tr>
           </thead>
@@ -213,328 +253,315 @@ const printInvoice = () => window.print()
               v-for="item in invoice.items"
               :key="item.id"
             >
-              <td class="text-no-wrap">
-                {{ item.name }}
+              <td>{{ item.description }}</td>
+              <td class="text-end">
+                {{ quantity(item.quantity) }}
               </td>
-              <td class="text-no-wrap">
-                {{ item.description }}
+              <td class="text-end">
+                {{ money(item.unit_price) }}
               </td>
-              <td class="text-center">
-                {{ item.hours }}
-              </td>
-              <td class="text-center">
-                1
-              </td>
-              <td class="text-center">
-                {{ itemPrice(item.cost, item.hours) }}
+              <td class="text-end">
+                {{ money(item.line_total) }}
               </td>
             </tr>
           </tbody>
         </VTable>
 
-        <div class="d-flex justify-space-between flex-column flex-sm-row">
-          <div class="mb-2">
-            <div
-              v-if="invoice.salesperson"
-              class="d-flex align-center mb-1"
-            >
-              <h6 class="text-h6 me-2">
-                Salesperson:
-              </h6>
-              <span class="text-body-1">{{ invoice.salesperson }}</span>
-            </div>
-            <p
-              v-if="invoice.thanksNote"
-              class="text-body-1"
-            >
-              {{ invoice.thanksNote }}
-            </p>
-          </div>
+        <VDivider />
 
-          <div>
-            <table class="w-100">
-              <tbody class="text-body-1">
-                <tr>
-                  <td class="pe-16">
-                    Subtotal:
-                  </td>
-                  <td class="text-end">
-                    <h6 class="text-h6">
-                      {{ formatMoney(totals.subtotal) }}
-                    </h6>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="pe-16">
-                    Discount:
-                  </td>
-                  <td class="text-end">
-                    <h6 class="text-h6">
-                      {{ formatMoney(totals.discount) }}
-                    </h6>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="pe-16">
-                    Tax:
-                  </td>
-                  <td class="text-end">
-                    <h6 class="text-h6">
-                      {{ invoice.taxPercent }}%
-                    </h6>
-                  </td>
-                </tr>
-                <tr v-if="totals.amountPaid.amount > 0">
-                  <td class="pe-16">
-                    Paid:
-                  </td>
-                  <td class="text-end">
-                    <h6 class="text-h6 text-success">
-                      {{ formatMoney(totals.amountPaid) }}
-                    </h6>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <VDivider class="my-2" />
-            <table class="w-100">
-              <tbody class="text-body-1">
-                <tr>
-                  <td class="pe-16">
-                    Balance Due:
-                  </td>
-                  <td class="text-end">
-                    <h6 class="text-h6">
-                      {{ formatMoney(totals.balance) }}
-                    </h6>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        <VCardText class="d-flex flex-wrap justify-space-between gap-6 pa-8">
+          <div
+            class="text-body-2"
+            style="max-inline-size: 22rem;"
+          >
+            <template v-if="invoice.notes">
+              <div class="font-weight-medium mb-1">
+                Note
+              </div>
+              {{ invoice.notes }}
+            </template>
           </div>
-        </div>
+          <table class="totals">
+            <tr>
+              <td>Subtotal</td><td>{{ formatMoney(invoice.money.subtotal) }}</td>
+            </tr>
+            <tr v-if="invoice.money.discount.amount">
+              <td>Discount ({{ invoice.discount_percent }}%)</td><td>−{{ formatMoney(invoice.money.discount) }}</td>
+            </tr>
+            <tr v-if="invoice.money.tax.amount">
+              <td>Tax ({{ invoice.tax_percent }}%)</td><td>{{ formatMoney(invoice.money.tax) }}</td>
+            </tr>
+            <tr class="grand">
+              <td>Total</td><td>{{ formatMoney(invoice.money.total) }}</td>
+            </tr>
+            <tr v-if="invoice.money.paid.amount">
+              <td>Paid</td><td>−{{ formatMoney(invoice.money.paid) }}</td>
+            </tr>
+            <tr class="grand">
+              <td>Balance due</td><td>{{ formatMoney(invoice.money.balance) }}</td>
+            </tr>
+          </table>
+        </VCardText>
+      </VCard>
 
-        <template v-if="invoice.note">
-          <VDivider class="my-6 border-dashed" />
-          <p class="mb-0 text-body-1">
-            <span class="text-high-emphasis font-weight-medium me-1">Note:</span>
-            <span>{{ invoice.note }}</span>
-          </p>
-        </template>
+      <VCard
+        title="Payments"
+        class="mt-6 no-print"
+      >
+        <VCardText v-if="!invoice.payments?.length">
+          No payments recorded yet.
+        </VCardText>
+        <VTable v-else>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Method</th>
+              <th>Note</th>
+              <th class="text-end">
+                Amount
+              </th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="p in invoice.payments"
+              :key="p.id"
+            >
+              <td>{{ formatDate(p.paid_on) }}</td>
+              <td>{{ paymentMethodLabels[p.method] }}</td>
+              <td>{{ p.note || '—' }}</td>
+              <td class="text-end">
+                {{ money(p.amount) }}
+              </td>
+              <td class="text-end">
+                <VBtn
+                  icon
+                  variant="text"
+                  size="small"
+                  color="error"
+                  aria-label="Remove payment"
+                  :loading="busy === 'payment'"
+                  @click="removePayment(p.id)"
+                >
+                  <VIcon icon="bx-trash" />
+                </VBtn>
+              </td>
+            </tr>
+          </tbody>
+        </VTable>
       </VCard>
     </VCol>
 
     <VCol
       cols="12"
       md="3"
-      class="d-print-none"
+      class="no-print"
     >
       <VCard>
-        <VCardText>
+        <VCardText class="d-flex flex-column gap-3">
           <VBtn
             block
-            prepend-icon="bx-paper-plane"
-            class="mb-4"
-            @click="openSendDrawer"
+            prepend-icon="bx-send"
+            :loading="busy === 'send'"
+            @click="send"
           >
-            Send Invoice
+            {{ invoice.status === 'draft' ? 'Send invoice' : 'Send again' }}
+          </VBtn>
+          <VBtn
+            block
+            color="success"
+            prepend-icon="bx-dollar"
+            :disabled="!invoice.money.balance.amount"
+            @click="openPayment"
+          >
+            Record payment
           </VBtn>
           <VBtn
             block
             variant="tonal"
             color="secondary"
-            class="mb-4"
-            @click="printInvoice"
+            prepend-icon="bx-edit"
+            :to="`/invoices/${invoice.id}/edit`"
           >
-            Download
+            Edit
           </VBtn>
-          <div class="d-flex flex-wrap gap-4 mb-4">
-            <VBtn
-              variant="tonal"
-              color="secondary"
-              class="flex-grow-1"
-              @click="printInvoice"
-            >
-              Print
-            </VBtn>
-            <VBtn
-              variant="tonal"
-              color="secondary"
-              class="flex-grow-1"
-              @click="router.push(`/invoices/${invoice.id}/edit`)"
-            >
-              Edit
-            </VBtn>
-          </div>
           <VBtn
             block
-            color="success"
-            prepend-icon="bx-dollar"
-            :disabled="totals.balance.amount === 0"
-            @click="openPaymentDrawer"
+            variant="tonal"
+            color="secondary"
+            prepend-icon="bx-printer"
+            @click="print"
           >
-            Add Payment
+            Print / PDF
           </VBtn>
+          <VBtn
+            block
+            variant="tonal"
+            color="secondary"
+            prepend-icon="bx-copy"
+            @click="duplicate"
+          >
+            Duplicate
+          </VBtn>
+          <VBtn
+            block
+            variant="text"
+            color="error"
+            prepend-icon="bx-trash"
+            :disabled="invoice.money.paid.amount > 0"
+            @click="isDeleteOpen = true"
+          >
+            Delete
+          </VBtn>
+          <div
+            v-if="invoice.money.paid.amount > 0"
+            class="text-caption text-medium-emphasis text-center"
+          >
+            Invoices with payments can't be deleted.
+          </div>
         </VCardText>
       </VCard>
     </VCol>
   </VRow>
 
-  <!-- Add Payment -->
-  <VNavigationDrawer
-    v-model="isPaymentDrawerOpen"
-    location="end"
-    temporary
-    width="400"
+  <VDialog
+    v-model="isPaymentOpen"
+    max-width="440"
   >
-    <div class="px-6 py-5 d-flex align-center">
-      <h5 class="text-h5">
-        Add Payment
-      </h5>
-      <VSpacer />
-      <VBtn
-        icon
-        variant="text"
-        @click="isPaymentDrawerOpen = false"
-      >
-        <VIcon icon="bx-x" />
-      </VBtn>
-    </div>
-    <VDivider />
-    <VCardText v-if="totals">
-      <VForm @submit.prevent="recordPayment">
-        <VRow>
-          <VCol cols="12">
-            <VTextField
-              :model-value="formatMoney(totals.balance)"
-              label="Invoice Balance"
-              disabled
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextField
-              v-model.number="paymentForm.amount"
-              type="number"
-              min="0"
-              label="Payment Amount"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextField
-              v-model="paymentForm.date"
-              type="date"
-              label="Payment Date"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VSelect
-              v-model="paymentForm.method"
-              label="Select Payment Method"
-              :items="['Bank Account', 'PayPal', 'Cash', 'Stripe']"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextarea
-              v-model="paymentForm.note"
-              label="Internal Payment Note"
-              rows="5"
-            />
-          </VCol>
-          <VCol cols="12">
-            <div class="d-flex gap-3">
-              <VBtn type="submit">
-                Send
-              </VBtn>
-              <VBtn
-                variant="tonal"
-                color="secondary"
-                @click="isPaymentDrawerOpen = false"
-              >
-                Cancel
-              </VBtn>
-            </div>
-          </VCol>
-        </VRow>
+    <VCard title="Record payment">
+      <VForm @submit.prevent="savePayment">
+        <VCardText class="d-flex flex-column gap-4">
+          <VTextField
+            v-model="payment.amount"
+            type="number"
+            min="0"
+            :step="priceStep"
+            label="Amount"
+            :suffix="invoice?.currency_code"
+            :hint="invoice ? `Balance due: ${formatMoney(invoice.money.balance)}` : ''"
+            persistent-hint
+            :error-messages="paymentErrors.amount"
+          />
+          <VSelect
+            v-model="payment.method"
+            :items="methodOptions"
+            label="Method"
+            :error-messages="paymentErrors.method"
+          />
+          <VTextField
+            v-model="payment.paid_on"
+            type="date"
+            label="Paid on"
+            :error-messages="paymentErrors.paid_on"
+          />
+          <VTextField
+            v-model="payment.note"
+            label="Note (optional)"
+            :error-messages="paymentErrors.note"
+          />
+        </VCardText>
+        <VCardActions class="pa-4">
+          <VSpacer />
+          <VBtn
+            variant="tonal"
+            color="secondary"
+            @click="isPaymentOpen = false"
+          >
+            Cancel
+          </VBtn>
+          <VBtn
+            type="submit"
+            variant="flat"
+            :loading="busy === 'payment'"
+          >
+            Save payment
+          </VBtn>
+        </VCardActions>
       </VForm>
-    </VCardText>
-  </VNavigationDrawer>
+    </VCard>
+  </VDialog>
 
-  <!-- Send Invoice -->
-  <VNavigationDrawer
-    v-model="isSendDrawerOpen"
-    location="end"
-    temporary
-    width="400"
+  <VDialog
+    v-model="isDeleteOpen"
+    max-width="400"
   >
-    <div class="px-6 py-5 d-flex align-center">
-      <h5 class="text-h5">
-        Send Invoice
-      </h5>
-      <VSpacer />
-      <VBtn
-        icon
-        variant="text"
-        @click="isSendDrawerOpen = false"
-      >
-        <VIcon icon="bx-x" />
-      </VBtn>
-    </div>
-    <VDivider />
-    <VCardText>
-      <VForm @submit.prevent="sendInvoice">
-        <VRow>
-          <VCol cols="12">
-            <VTextField
-              v-model="sendForm.from"
-              label="From"
-              placeholder="sender@email.com"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextField
-              v-model="sendForm.to"
-              label="To"
-              placeholder="receiver@email.com"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextField
-              v-model="sendForm.subject"
-              label="Subject"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VTextarea
-              v-model="sendForm.message"
-              label="Message"
-              rows="8"
-            />
-          </VCol>
-          <VCol cols="12">
-            <VChip
-              color="primary"
-              variant="tonal"
-              size="small"
-              class="mb-4"
-              prepend-icon="bx-link"
-            >
-              Invoice Attached
-            </VChip>
-            <div class="d-flex gap-3">
-              <VBtn type="submit">
-                Send
-              </VBtn>
-              <VBtn
-                variant="tonal"
-                color="secondary"
-                @click="isSendDrawerOpen = false"
-              >
-                Cancel
-              </VBtn>
-            </div>
-          </VCol>
-        </VRow>
-      </VForm>
-    </VCardText>
-  </VNavigationDrawer>
+    <VCard :title="`Delete invoice #${invoice?.number}?`">
+      <VCardText>This can't be undone. Any appointments on it can be invoiced again.</VCardText>
+      <VCardActions class="pa-4">
+        <VSpacer />
+        <VBtn
+          variant="tonal"
+          color="secondary"
+          @click="isDeleteOpen = false"
+        >
+          Cancel
+        </VBtn>
+        <VBtn
+          color="error"
+          variant="flat"
+          @click="remove"
+        >
+          Delete
+        </VBtn>
+      </VCardActions>
+    </VCard>
+  </VDialog>
+
+  <VSnackbar
+    v-model="snackbar.show"
+    :color="snackbar.color"
+    location="top end"
+  >
+    {{ snackbar.text }}
+  </VSnackbar>
 </template>
+
+<style scoped>
+.totals {
+  border-collapse: collapse;
+  min-inline-size: 16rem;
+}
+
+.totals td {
+  padding-block: 4px;
+}
+
+.totals td:last-child {
+  padding-inline-start: 24px;
+  text-align: end;
+}
+
+.totals .grand td {
+  font-weight: 600;
+  padding-block-start: 8px;
+}
+</style>
+
+<style>
+/* Print just the invoice document. */
+@media print {
+  .layout-navbar,
+  .layout-vertical-nav,
+  .layout-footer,
+  .no-print,
+  .v-snackbar {
+    display: none !important;
+  }
+
+  .layout-page-content,
+  .layout-content-wrapper {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .v-col-md-9 {
+    flex: 0 0 100% !important;
+    max-inline-size: 100% !important;
+  }
+
+  .invoice-document {
+    box-shadow: none !important;
+  }
+}
+</style>

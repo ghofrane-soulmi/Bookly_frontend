@@ -3,16 +3,27 @@ import AccountSettingsAccount from '@/views/pages/account-settings/AccountSettin
 import AccountSettingsBusiness from '@/views/pages/account-settings/AccountSettingsBusiness.vue'
 import AccountSettingsNotifications from '@/views/pages/account-settings/AccountSettingsNotifications.vue'
 
+import { useAuthStore } from '@/stores/auth'
+
 const route = useRoute()
+const authStore = useAuthStore()
 
 const activeTab = ref(route.params.tab ?? 'account')
 
-// tabs
-const tabs = [
-  { title: 'Account', icon: 'bx-user', tab: 'account' },
-  { title: 'Business', icon: 'bx-store', tab: 'business' },
-  { title: 'Notifications', icon: 'bx-bell', tab: 'notifications' },
-]
+// Business-wide settings need business.manage (owners); everyone can edit
+// their own account.
+const tabs = computed(() => {
+  const list = [{ title: 'Account', icon: 'bx-user', tab: 'account' }]
+
+  if (authStore.can('business.manage')) {
+    list.push(
+      { title: 'Business', icon: 'bx-store', tab: 'business' },
+      { title: 'Notifications', icon: 'bx-bell', tab: 'notifications' },
+    )
+  }
+
+  return list
+})
 </script>
 
 <template>
@@ -45,15 +56,17 @@ const tabs = [
         <AccountSettingsAccount />
       </VWindowItem>
 
-      <!-- Business -->
-      <VWindowItem value="business">
-        <AccountSettingsBusiness />
-      </VWindowItem>
+      <template v-if="authStore.can('business.manage')">
+        <!-- Business -->
+        <VWindowItem value="business">
+          <AccountSettingsBusiness />
+        </VWindowItem>
 
-      <!-- Notifications -->
-      <VWindowItem value="notifications">
-        <AccountSettingsNotifications />
-      </VWindowItem>
+        <!-- Notifications -->
+        <VWindowItem value="notifications">
+          <AccountSettingsNotifications />
+        </VWindowItem>
+      </template>
     </VWindow>
   </div>
 </template>
