@@ -3,14 +3,18 @@ import AuthProvider from '@/views/pages/authentication/AuthProvider.vue'
 import { useAuthStore } from '@/stores/auth'
 import logo from '@images/logo.svg?raw'
 import authV1BottomShape from '@images/svg/auth-v1-bottom-shape.svg?url'
-import authV1TopShape from '@images/svg/auth-v1-top-shape.svg?url'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
+// "Explore the dashboard" on the public landing page links here with ?demo=1:
+// fill in the read-only demo owner so visitors only have to press "Login".
+const isDemo = route.query.demo === '1'
+
 const form = ref({
-  email: '',
-  password: '',
+  email: isDemo ? 'owner@demo.bookly.test' : '',
+  password: isDemo ? '123456789' : '',
 })
 
 const isPasswordVisible = ref(false)
@@ -39,13 +43,6 @@ const onSubmit = async () => {
 <template>
   <div class="auth-wrapper d-flex align-center justify-center ">
     <div class="position-relative ">
-      <!-- 👉 Top shape -->
-
-<!--      <VImg-->
-<!--        :src="authV1TopShape"-->
-<!--        class="text-primary auth-v1-top-shape d-none d-sm-block"-->
-<!--      />-->
-
       <!-- 👉 Bottom shape -->
       <VImg
         :src="authV1BottomShape"
@@ -92,6 +89,15 @@ const onSubmit = async () => {
             @click:close="errorMessage = ''"
           >
             {{ errorMessage }}
+          </VAlert>
+
+          <VAlert
+            v-if="isDemo && !errorMessage"
+            type="info"
+            variant="tonal"
+            class="mb-4"
+          >
+            The demo salon's owner account is filled in. Press <strong>Login</strong> to explore the dashboard.
           </VAlert>
 
           <VForm @submit.prevent="onSubmit">
