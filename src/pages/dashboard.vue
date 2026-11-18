@@ -46,14 +46,25 @@ const vuetifyTheme = useTheme()
 
 const summary = ref<DashboardSummary | null>(null)
 const isLoading = ref(true)
+const loadError = ref('')
 
 const fetchSummary = async () => {
   isLoading.value = true
+  loadError.value = ''
 
-  const { data } = await api.get('/dashboard/summary')
+  // Without the try/finally a failed request (server restarting, network
+  // blip, expired session) left the spinner up forever.
+  try {
+    const { data } = await api.get('/dashboard/summary')
 
-  summary.value = data.data
-  isLoading.value = false
+    summary.value = data.data
+  }
+  catch {
+    loadError.value = 'The dashboard could not be loaded. Check your connection and try again.'
+  }
+  finally {
+    isLoading.value = false
+  }
 }
 
 fetchSummary()
@@ -482,9 +493,25 @@ const topServicesDonutSeries = computed(() => summary.value?.top_services.map(s 
     </VCol>
   </VRow>
 
-  <VProgressCircular
+  <PageLoader
     v-else-if="isLoading"
-    indeterminate
-    color="primary"
+    text="Loading your dashboard…"
   />
+
+  <VAlert
+    v-else-if="loadError"
+    type="error"
+    variant="tonal"
+    :text="loadError"
+  >
+    <template #append>
+      <VBtn
+        variant="text"
+        color="error"
+        @click="fetchSummary"
+      >
+        Retry
+      </VBtn>
+    </template>
+  </VAlert>
 </template>

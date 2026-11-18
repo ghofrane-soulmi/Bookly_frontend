@@ -7,6 +7,9 @@ import VerticalNavLayout from '@layouts/components/VerticalNavLayout.vue'
 import Footer from '@/layouts/components/Footer.vue'
 import NavbarThemeSwitcher from '@/layouts/components/NavbarThemeSwitcher.vue'
 import UserProfile from '@/layouts/components/UserProfile.vue'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
 </script>
 
 <template>
@@ -22,35 +25,19 @@ import UserProfile from '@/layouts/components/UserProfile.vue'
           <VIcon icon="bx-menu" />
         </IconBtn>
 
-        <!-- 👉 Search -->
+        <!-- 👉 Current business -->
         <div
-          class="d-flex align-center cursor-pointer ms-lg-n3"
-          style="user-select: none;"
+          v-if="authStore.business?.name"
+          class="d-flex align-center ms-lg-n1 text-truncate"
         >
-          <!-- 👉 Search Trigger button -->
-          <IconBtn>
-            <VIcon icon="bx-search" />
-          </IconBtn>
-
-          <span class="d-none d-md-flex align-center text-disabled ms-2">
-            <span class="me-2">Search</span>
-            <span class="meta-key">&#8984;K</span>
-          </span>
+          <VIcon
+            icon="bx-store"
+            class="me-2 text-medium-emphasis"
+          />
+          <span class="text-body-1 font-weight-medium text-truncate">{{ authStore.business.name }}</span>
         </div>
 
         <VSpacer />
-
-        <IconBtn
-          href="https://github.com/themeselection/sneat-vuetify-vuejs-admin-template-free"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <VIcon icon="bxl-github" />
-        </IconBtn>
-
-        <IconBtn>
-          <VIcon icon="bx-bell" />
-        </IconBtn>
 
         <NavbarThemeSwitcher class="me-1" />
 
@@ -71,7 +58,7 @@ import UserProfile from '@/layouts/components/UserProfile.vue'
         <!-- eslint-enable -->
 
         <h1 class="app-logo-title">
-          sneat
+          Bookly
         </h1>
       </RouterLink>
 
@@ -98,15 +85,6 @@ import UserProfile from '@/layouts/components/UserProfile.vue'
 </template>
 
 <style lang="scss" scoped>
-.meta-key {
-  border: thin solid rgba(var(--v-border-color), var(--v-border-opacity));
-  border-radius: 6px;
-  block-size: 1.5625rem;
-  line-height: 1.3125rem;
-  padding-block: 0.125rem;
-  padding-inline: 0.25rem;
-}
-
 .app-logo {
   display: flex;
   align-items: center;
@@ -116,7 +94,6 @@ import UserProfile from '@/layouts/components/UserProfile.vue'
     font-size: 1.25rem;
     font-weight: 500;
     line-height: 1.75rem;
-    text-transform: uppercase;
   }
 }
 </style>

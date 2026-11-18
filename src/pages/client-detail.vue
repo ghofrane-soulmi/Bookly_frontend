@@ -70,10 +70,9 @@ const initials = (name: string) => name.split(' ').map(part => part[0]).slice(0,
     {{ errorMessage }}
   </VAlert>
 
-  <VProgressCircular
+  <PageLoader
     v-if="isLoading"
-    indeterminate
-    color="primary"
+    text="Loading client…"
   />
 
   <VRow v-else-if="client">

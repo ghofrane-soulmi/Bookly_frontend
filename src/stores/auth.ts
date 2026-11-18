@@ -33,9 +33,18 @@ interface LoginPayload {
 }
 
 function readStorage<T>(key: string): T | null {
-  const raw = localStorage.getItem(key)
+  // Runs while the app boots: a corrupted value (e.g. the string "undefined")
+  // must not throw, or the whole app white-screens before it can render.
+  try {
+    const raw = localStorage.getItem(key)
 
-  return raw ? JSON.parse(raw) as T : null
+    return raw ? JSON.parse(raw) as T : null
+  }
+  catch {
+    localStorage.removeItem(key)
+
+    return null
+  }
 }
 
 export const useAuthStore = defineStore('auth', {

@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import avatar1 from '@images/avatars/avatar-1.png'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+const initials = computed(() => (authStore.user?.name ?? '?')
+  .split(/\s+/)
+  .filter(Boolean)
+  .slice(0, 2)
+  .map(part => part[0]!.toUpperCase())
+  .join(''))
 
 const onLogout = async () => {
   await authStore.logout()
@@ -12,129 +18,68 @@ const onLogout = async () => {
 </script>
 
 <template>
-  <VBadge
-    dot
-    location="bottom right"
-    offset-x="3"
-    offset-y="3"
-    color="success"
-    bordered
+  <VAvatar
+    class="cursor-pointer"
+    color="primary"
+    variant="tonal"
   >
-    <VAvatar
-      class="cursor-pointer"
-      color="primary"
-      variant="tonal"
+    <span class="text-body-1 font-weight-medium">{{ initials }}</span>
+
+    <VMenu
+      activator="parent"
+      width="240"
+      location="bottom end"
+      offset="14px"
     >
-      <VImg :src="avatar1" />
+      <VList>
+        <VListItem>
+          <template #prepend>
+            <VListItemAction start>
+              <VAvatar
+                color="primary"
+                variant="tonal"
+              >
+                <span class="text-body-1 font-weight-medium">{{ initials }}</span>
+              </VAvatar>
+            </VListItemAction>
+          </template>
 
-      <!-- SECTION Menu -->
-      <VMenu
-        activator="parent"
-        width="230"
-        location="bottom end"
-        offset="14px"
-      >
-        <VList>
-          <!-- 👉 User Avatar & Name -->
-          <VListItem>
-            <template #prepend>
-              <VListItemAction start>
-                <VBadge
-                  dot
-                  location="bottom right"
-                  offset-x="3"
-                  offset-y="3"
-                  color="success"
-                >
-                  <VAvatar
-                    color="primary"
-                    variant="tonal"
-                  >
-                    <VImg :src="avatar1" />
-                  </VAvatar>
-                </VBadge>
-              </VListItemAction>
+          <VListItemTitle class="font-weight-semibold">
+            {{ authStore.user?.name }}
+          </VListItemTitle>
+          <VListItemSubtitle class="text-capitalize">
+            {{ authStore.user?.role }}<template v-if="authStore.business?.name">
+              · {{ authStore.business.name }}
             </template>
+          </VListItemSubtitle>
+        </VListItem>
 
-            <VListItemTitle class="font-weight-semibold">
-              {{ authStore.user?.name }}
-            </VListItemTitle>
-            <VListItemSubtitle class="text-capitalize">
-              {{ authStore.user?.role }}
-            </VListItemSubtitle>
-          </VListItem>
-          <VDivider class="my-2" />
+        <VDivider class="my-2" />
 
-          <!-- 👉 Profile -->
-          <VListItem link>
-            <template #prepend>
-              <VIcon
-                class="me-2"
-                icon="bx-user"
-                size="22"
-              />
-            </template>
+        <VListItem to="/account-settings">
+          <template #prepend>
+            <VIcon
+              class="me-2"
+              icon="bx-cog"
+              size="22"
+            />
+          </template>
+          <VListItemTitle>Account settings</VListItemTitle>
+        </VListItem>
 
-            <VListItemTitle>Profile</VListItemTitle>
-          </VListItem>
+        <VDivider class="my-2" />
 
-          <!-- 👉 Settings -->
-          <VListItem link>
-            <template #prepend>
-              <VIcon
-                class="me-2"
-                icon="bx-cog"
-                size="22"
-              />
-            </template>
-
-            <VListItemTitle>Settings</VListItemTitle>
-          </VListItem>
-
-          <!-- 👉 Pricing -->
-          <VListItem link>
-            <template #prepend>
-              <VIcon
-                class="me-2"
-                icon="bx-dollar"
-                size="22"
-              />
-            </template>
-
-            <VListItemTitle>Pricing</VListItemTitle>
-          </VListItem>
-
-          <!-- 👉 FAQ -->
-          <VListItem link>
-            <template #prepend>
-              <VIcon
-                class="me-2"
-                icon="bx-help-circle"
-                size="22"
-              />
-            </template>
-
-            <VListItemTitle>FAQ</VListItemTitle>
-          </VListItem>
-
-          <!-- Divider -->
-          <VDivider class="my-2" />
-
-          <!-- 👉 Logout -->
-          <VListItem @click="onLogout">
-            <template #prepend>
-              <VIcon
-                class="me-2"
-                icon="bx-log-out"
-                size="22"
-              />
-            </template>
-
-            <VListItemTitle>Logout</VListItemTitle>
-          </VListItem>
-        </VList>
-      </VMenu>
-      <!-- !SECTION -->
-    </VAvatar>
-  </VBadge>
+        <VListItem @click="onLogout">
+          <template #prepend>
+            <VIcon
+              class="me-2"
+              icon="bx-log-out"
+              size="22"
+            />
+          </template>
+          <VListItemTitle>Logout</VListItemTitle>
+        </VListItem>
+      </VList>
+    </VMenu>
+  </VAvatar>
 </template>

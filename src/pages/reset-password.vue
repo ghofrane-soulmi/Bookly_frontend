@@ -78,7 +78,7 @@ const onSubmit = async () => {
               v-html="logo"
             />
             <h1 class="app-logo-title">
-              sneat
+              Bookly
             </h1>
           </RouterLink>
         </VCardItem>
