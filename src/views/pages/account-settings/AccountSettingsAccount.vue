@@ -14,6 +14,7 @@ const form = ref({
 const isSaving = ref(false)
 const formErrors = ref<Record<string, string[]>>({})
 const successMessage = ref('')
+const errorMessage = ref('')
 
 const saveAccount = async () => {
   if (!authStore.user)
@@ -22,6 +23,7 @@ const saveAccount = async () => {
   isSaving.value = true
   formErrors.value = {}
   successMessage.value = ''
+  errorMessage.value = ''
 
   try {
     const payload: Record<string, string> = { name: form.value.name, email: form.value.email }
@@ -45,6 +47,10 @@ const saveAccount = async () => {
       formErrors.value = res.errors ?? {}
     }
   }
+  catch (error: any) {
+    // e.g. 403 for the shared demo account, whose login can't be changed.
+    errorMessage.value = error.response?.data?.status?.message ?? 'Could not save your changes. Please try again.'
+  }
   finally {
     isSaving.value = false
   }
@@ -65,6 +71,17 @@ const saveAccount = async () => {
             @click:close="successMessage = ''"
           >
             {{ successMessage }}
+          </VAlert>
+
+          <VAlert
+            v-if="errorMessage"
+            type="error"
+            variant="tonal"
+            class="mb-4"
+            closable
+            @click:close="errorMessage = ''"
+          >
+            {{ errorMessage }}
           </VAlert>
 
           <VForm @submit.prevent="saveAccount">

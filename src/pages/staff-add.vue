@@ -90,6 +90,10 @@ const saveStaff = async () => {
       formErrors.value = res.errors ?? {}
     }
   }
+  catch (error: any) {
+    // e.g. 403 when changing the login of a shared demo account.
+    errorMessage.value = error.response?.data?.status?.message ?? 'Could not save this staff member. Please try again.'
+  }
   finally {
     isSaving.value = false
   }

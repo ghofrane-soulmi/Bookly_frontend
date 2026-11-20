@@ -5,7 +5,7 @@ The staff app of **Bookly**, a multi-tenant booking and business-management SaaS
 **Stack:** Vue 3 · TypeScript · Vite · Vuetify 3 · Pinia · Axios · FullCalendar · ApexCharts
 **Related:** [API (Laravel)](https://github.com/ghofrane-soulmi/Bookly_backend) · [Front office (customer booking)](https://github.com/ghofrane-soulmi/Bookly_frontoffice)
 
-> **Live demo:** _add your Vercel URL here after deploying_. Log in as `owner@demo.bookly.test` / `123456789`.
+> **Live demo: <https://bookly-admin-tn.vercel.app>**. Log in as `owner@demo.bookly.test` / `123456789`, or open it [with the login pre-filled](https://bookly-admin-tn.vercel.app/login?demo=1). The demo resets every night.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
